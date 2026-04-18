@@ -1,8 +1,8 @@
 import carla
 from scipy.io import loadmat
 
-BLUEPRINT_CONE_BLUE   = '../cones_models/blue_cone.fbx'   
-BLUEPRINT_CONE_YELLOW = '../cones_models/yellow_cone.fbx'
+BLUEPRINT_CONE_BLUE   = 'static.prop.fssconeblue'   
+BLUEPRINT_CONE_YELLOW = 'static.prop.fssconeyellow'
 
 def main():
     client = carla.Client('localhost', 2000)
@@ -28,7 +28,7 @@ def main():
             carla.Location(x=float(x), y=float(y), z=0.0)
         ))
 
-    print("✅ Coni spawnati!")
+    print("Coni spawnati!")
 
 if __name__ == '__main__':
-    main()
+    main()j
