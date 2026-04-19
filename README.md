@@ -97,3 +97,40 @@ world = client.load_world('void_test_map')
 map_data = world.get_map()
 print(f"Success! Map loaded: {map_data.name}")
 ```
+
+## Import reosurces and spawn
+
+### 1. Copy the files in carla directories
+
+First of all make sure to create the correct directories that will hold all the cone related files in UE4.
+
+```
+# Create the directory
+mkdir -p ~/ROOT/carla/Unreal/CarlaUE4/Content/Carla/Static/Props/Cones/
+
+# Copy the Static Meshes and Blueprints
+cp Cones/*.uasset ~/ROOT/carla/Unreal/CarlaUE4/Content/Carla/Static/Props/Cones/
+```
+
+### 2. Update the deafult package JSON file
+
+Open the default package JSON file at:
+```
+nano ~/carla/Unreal/CarlaUE4/Content/Carla/Config/Default.Package.json
+```
+
+and paste, at the beginning of the file, the blocks written in
+
+```
+config/carla/Defalt.Package.json
+```
+provided by this repository.
+
+### 3. Launch the server and spawn the entities
+
+Given the .mat file provided, launch the server and **after that** launch the script. Make sure you're executing it using **Python 3.10** othwerwise carla module import will fail.
+
+```
+python3 carla_spawn_track.py
+```
+
