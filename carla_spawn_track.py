@@ -48,4 +48,4 @@ def main():
     print("\nSpawn completato.")
 
 if __name__ == '__main__':
-    main()
+    main()j
