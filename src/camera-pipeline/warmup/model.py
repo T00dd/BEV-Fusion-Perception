@@ -54,7 +54,7 @@ class DetectionHead2d(nn.Module):
 
 class HRNet_with_detection_head(nn.Module):
     
-    #modello completo con backbone HRNet e head per detection 2d
+    #modello completo con backbone HRNet e head per detection 2d per il warmup
 
     def __init__(
         self, 
@@ -62,13 +62,13 @@ class HRNet_with_detection_head(nn.Module):
         feature_index: int = 1,
         num_classes: int = 2,
         head_hidden_channels: int = 64,
-        head_numlayers: int = 3
-        pretrained: bool = True
+        head_numlayers: int = 3,
+        pretrained: bool = True,
     ):
         super().__init__()
         self.feature_index = feature_index
     
-        #carico backbone da timm
+        #carico backbone da timm con features only
         self.backbone = timm.create_model(
             backbone_name,
             pretrained=pretrained,
@@ -76,4 +76,44 @@ class HRNet_with_detection_head(nn.Module):
             out_indices=(feature_index,),
         )
     
+        feature_channels = self.backbone.feature_info.channels()[0]
+        feature_reduction = self.backbone.feature_info.reduction()[0]
+    
+        print(f"Backbone {backbone_name} loaded with feature channels: {feature_channels} and stride: {feature_reduction}")
+        print(f"Using feature index: {feature_index}")
+
+        #head per detection 2d
+        self.detection_head = DetectionHead2d(
+            in_channels=feature_channels,
+            hidden_channels=head_hidden_channels,
+            num_classes=num_classes,
+            numlayers=head_numlayers,
+        )
+
+    
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+
+        #backbone: ritorna una lista con un solo elemento (la feature map scelta)
+        features = self.backbone(x)
+        feature_map = features[0]  #(B, C_feat, H/stride, W/stride)
+
+        heatmap_logits, offset_pred = self.head(feature_map)
+
+        return{
+
+            "heatmap_logits": heatmap_logits,
+            "offset_pred": offset_pred,
+            "feature_map": feature_map, #returniamo anche le feature per futura visualizzazione oopure debug
+        }
+    
+
+    def get_param(self, backbone_lr: float, head_lr: float, weight_decay: float):
+
+        #ritorna i parametri del modello con learning rate differenziati per backbone e head
+
+        return [
+            {"params": self.backbone.parameters(), "lr": backbone_lr, "weight_decay": weight_decay},
+            {"params": self.detection_head.parameters(), "lr": head_lr, "weight_decay": weight_decay},
+        ]
+
         
