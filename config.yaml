@@ -1,0 +1,23 @@
+zmq_transmission: true 
+
+camera:
+  type: "stereo" # "mono", "stereo", "rgbd"
+  # inertial: true
+
+send position: true
+
+# Track spawner parameters
+track_spawner:
+  enabled: true             # activate/deactivate spawning
+  scale: 2.0                # multiplier applied to the track positions (track size)
+  start_x: 75.8             # place point of the track in the map (x-axis)
+  start_y: 132.5            # place point of the track in the map (y-axis)
+  fit_to_map: true          # if the scaled track exceeds the map, shrink scale to fit
+
+  cone_blueprint_left: "static.prop.blue_cone"
+  cone_blueprint_right: "static.prop.yellow_cone"
+ 
+# Controller
+controller:
+  target_speed: 8.0        # m/s
+  lookahead: 6.0           # meters
