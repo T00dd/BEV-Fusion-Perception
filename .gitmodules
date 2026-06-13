@@ -1,6 +1,7 @@
-[submodule "track-generator"]
-	path = track-generator
+[submodule "lib/track-generator"]
+	path = lib/track-generator
 	url = https://github.com/eagletrt/track-generator-sw
 [submodule "lib/track-reconstructor"]
 	path = lib/track-reconstructor
 	url = https://github.com/eagletrt/track-reconstructor.git
+	
