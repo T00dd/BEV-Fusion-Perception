@@ -1,0 +1,81 @@
+# main source of truth for everything that concerns dataset generation
+# this is actually read by the automation scripts
+
+carla:
+  host: "localhost"
+  port: 2000
+  tm_port: 8000
+  timeout: 20.0
+  # synchronous fixed timestep. 0.05 = 20 Hz, matches a full lidar rotation
+  # at rotation_frequency 20, so each tick yields one complete scan.
+  fixed_delta_seconds: 0.05
+
+# grid parameters for the BEV heatmap. The grid is defined in world coordinates, and
+# the voxel size is the resolution of the heatmap. The grid is used to generate
+# the heatmap from the LiDAR point cloud. The heatmap is generated on the fly
+# in the dataloader, NOT saved here. The grid is also used to define the
+# area of interest for the dataset, and to filter out points outside the grid.
+grid:
+  extent:
+    x_min: 0.0
+    x_max: 50.0
+    y_min: -25.0
+    y_max: 25.0
+    z_min: -2.0
+    z_max: 2.0
+  voxel_size: [0.1, 0.1, 0.15]   # metres; BEV pixel = 0.1 -> 500 x 500 grid
+
+scenes:
+  count: 1                 # start at 1 to test end-to-end
+  split_ratios: {train: 0.7, val: 0.15, test: 0.15}
+  split_seed: 0
+
+capture:
+  max_frames_per_scene: 100   # start small, about 100 at first
+  warmup_ticks: 10            # discard initial unsettled ticks
+  capture_every_n_ticks: 5    # >1 to subsample (less near-duplicate frames)
+
+ego:
+  blueprint: "vehicle.audi.tt"
+  target_speed: 8.0          # m/s; vary across runs for point-density diversity
+  lookahead: 6.0
+
+sensors:
+  lidar:
+    channels: 64
+    range: 120
+    points_per_second: 500000
+    upper_fov: 22.5
+    lower_fov: -22.5
+    rotation_frequency: 20
+    noise_stddev: 0.0          # set >0 to add sensor noise to some scenes
+    mount: {x: 0.4, y: 0.0, z: 1.5}
+  cameras:
+    - name: "front"
+      width: 640
+      height: 480
+      fov: 90
+      mount: {x: 0.4, y: 0.0, z: 1.4, yaw: 0.0}
+    # add left/right cameras here when you want multi-view
+    # the pipeline already handles any number of cameras.
+
+# environmental conditions to vary across scenes. The weather is set at the start of each scene
+conditions:
+  - name: "noon_clear"
+    weather: {cloudiness: 5, precipitation: 0, sun_altitude_angle: 75,
+              fog_density: 0, wetness: 0}
+  - name: "overcast"
+    weather: {cloudiness: 80, precipitation: 0, sun_altitude_angle: 45,
+              fog_density: 0, wetness: 0}
+  - name: "light_rain"
+    weather: {cloudiness: 70, precipitation: 40, sun_altitude_angle: 40,
+              fog_density: 10, wetness: 50}
+  - name: "low_sun"
+    weather: {cloudiness: 10, precipitation: 0, sun_altitude_angle: 8,
+              fog_density: 0, wetness: 0}
+  - name: "dusk"
+    weather: {cloudiness: 30, precipitation: 0, sun_altitude_angle: -3,
+              fog_density: 5, wetness: 0}
+
+output:
+  dataset_dir: "../../dataset"     # relative to src/dataset_automation/
