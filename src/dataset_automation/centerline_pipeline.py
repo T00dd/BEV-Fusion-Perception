@@ -3,7 +3,10 @@ import sys
 from pathlib import Path
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from repo_paths import SCRIPTS_DIR, DATA_DIR, RECONSTRUCTOR_BIN
+
+sys.path.insert(0, str(SCRIPTS_DIR))
 from cones_to_csv import process_cones_for_reconstructor, write_cones_csv
 
 WAYPOINT_Z = 0.0
@@ -13,8 +16,8 @@ def compute_centerline_carla(
         start_x: float,
         start_y: float,
         carla_scale: float = 2.0,
-        data_dir: Path = Path("../data"),
-        reconstructor_bin: Path = Path("../build/track_to_centerline"),
+        data_dir: Path = DATA_DIR,
+        reconstructor_bin: Path = RECONSTRUCTOR_BIN,
         z: float = WAYPOINT_Z
 ) -> np.ndarray:
     
