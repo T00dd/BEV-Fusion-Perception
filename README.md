@@ -1,136 +1,78 @@
-# BEV-Fusion-Perception
+# Dataset Automation (CARLA to BEV cone dataset)
 
-## Custom Blank Map Setup & OpenDRIVE (.xodr) Integration
+Generates a synthetic Formula-Student cone dataset from CARLA: synchronized
+LiDAR + camera frames with ground-truth cone positions in the ego/LiDAR frame.
 
-This section explains how to properly link a custom empty map (already created in Unreal Engine) with the CARLA Python API, ensuring the simulation can generate the map logic without throwing OpenDRIVE parsing errors.
-
-### 1. Python Environment Compatibility (Client-Server Match)
-CARLA is highly sensitive to version mismatches between the simulator (Server) and the Python API (Client). 
-
-You must install the `.whl` file provided in your CARLA build. Please checkout which Python version your `.whl` file.
-You might as well rely on a dedicate virtual environment, if so, using `conda`:
-
-   ```bash
-   conda create -n carla_env python=<YOUR_SUPPORTED_VERSION>
-   conda activate carla_env
-   pip install --upgrade pip
-   ```
-
-And then,
-
-   ```bash
-   cd <CARLA_ROOT>/PythonAPI/carla/dist/
-   pip install carla-<CARLA_VERSION>-cp<YOUR_SUPPORTED_VERSION>-cp<YOUR_SUPPORTED_VERSION>-linux_x86_64.whl
-   ```
-*Note: Make sure your IDE (e.g., VS Code) is set to use the correct matching Python interpreter*
-
-### 2. The Minimal OpenDRIVE (.xodr) File
-To use the `world.get_map()` method in Python, CARLA requires a valid `.xodr` (OpenDRIVE) file alongside your visual `.umap` level. If this file is missing or misplaced, you will encounter the `ERROR: unable to parse the OpenDRIVE XML string` fatal error.
-
-Create a minimal `.xodr` file that defines a simple 100-meter straight line (so the simulator has a mathematical reference for the map). 
-
-Create a file named **`YOUR_MAP_NAME.xodr`** (e.g., `void_test_map.xodr`) with the following contents:
-
-```xml
-<?xml version="1.0" standalone="yes"?>
-<OpenDRIVE>
-  <header revMajor="1" revMinor="4" name="MyBlankMap" version="1.0"
-          north="0" south="0" east="0" west="0">
-  </header>
-  <road name="Road 0" length="100" id="0" junction="-1">
-    <link/>
-    <planView>
-      <geometry s="0" x="0" y="0" hdg="0" length="100">
-        <line/>
-      </geometry>
-    </planView>
-    <lanes>
-      <laneSection s="0">
-        <center>
-          <lane id="0" type="none" level="false"/>
-        </center>
-        <right>
-          <lane id="-1" type="driving" level="false">
-            <width sOffset="0" a="3.5" b="0" c="0" d="0"/>
-          </lane>
-        </right>
-      </laneSection>
-    </lanes>
-  </road>
-</OpenDRIVE>
-```
-
-### 3. Required Directory Structure
-CARLA has strict hardcoded paths for map generation. **Do not place the `.xodr` file in the same directory as your `.umap` file.** The `.xodr` file MUST be placed inside a specific `OpenDrive` subdirectory within the `Maps` folder. 
-
-1. Create the directory if it doesn't exist:
-   ```bash
-   mkdir -p <CARLA_ROOT>/Unreal/CarlaUE4/Content/Carla/Maps/OpenDrive
-   ```
-2. Move your newly created XML file there:
-   ```bash
-   mv void_test_map.xodr <CARLA_ROOT>/Unreal/CarlaUE4/Content/Carla/Maps/OpenDrive/
-   ```
-
-**Final expected structure:**
-```text
-Unreal/CarlaUE4/Content/Carla/Maps/
-├── void_test_map.umap               <-- Visual 3D level
-└── OpenDrive/
-    └── void_test_map.xodr           <-- Map logic (MUST match the .umap name)
-```
-
-### 4. Verification
-With the simulator running your custom map (hit *Play* in Unreal Engine), run the following Python script using your configured `carla_env`:
-
-```python
-import carla
-
-# Connect to the simulator
-client = carla.Client('localhost', 2000)
-client.set_timeout(60.0)
-
-# Load the custom map
-world = client.load_world('void_test_map')
-
-# Fetch the map data (this will fail if the .xodr is missing or misplaced)
-map_data = world.get_map()
-print(f"Success! Map loaded: {map_data.name}")
-```
-
-## Import reosurces and spawn
-
-### 1. Copy the files in carla directories
-
-First of all make sure to create the correct directories that will hold all the cone related files in UE4.
+## Where this lives
 
 ```
-# Create the directory
-mkdir -p ~/ROOT/carla/Unreal/CarlaUE4/Content/Carla/Static/Props/Cones/
-
-# Copy the Static Meshes and Blueprints
-cp Cones/*.uasset ~/ROOT/carla/Unreal/CarlaUE4/Content/Carla/Static/Props/Cones/
+src/dataset_automation/
+  dataset_builder.py      # entry point (orchestrator: manifest, resume, logs)
+  scene_recorder.py       # records one scene end-to-end
+  sensor_capture.py       # synchronous lidar+camera capture (dataset-grade)
+  gt_extraction.py        # cone GT -> ego/lidar frame, color, instance id
+  coordinate_frames.py    # SINGLE source of truth for frame conventions
+  dataset_config.yaml     # the only file you edit
 ```
 
-### 2. Update the deafult package JSON file
+Reuses the existing modules unchanged: `track_spawner.py` (the updated one),
+`centerline_pipeline.py`, `pursuit_controller.py`, plus the two submodules under
+`lib/` and the compiled `build/track_to_centerline`.
 
-Open the default package JSON file at:
+## Coordinate convention (read coordinate_frames.py)
+
+CARLA is left-handed (x fwd, **y right**, z up). The dataset is **right-handed**
+(x fwd, **y left**, z up) to match KITTI/nuScenes/OpenPCDet. The only change is
+`y -> -y`, applied once at save time to both point clouds and cone positions.
+The convention is also stamped into every scene's `calib.yaml`.
+
+## Run
+
+Test end-to-end first (config ships with `scenes.count: 1`,
+`max_frames_per_scene: 100`):
+
+```bash
+cd src/dataset_automation
+python dataset_builder.py --config dataset_config.yaml
 ```
-nano ~/carla/Unreal/CarlaUE4/Content/Carla/Config/Default.Package.json
+
+Then scale up by editing `dataset_config.yaml` (`scenes.count: 100`,
+`max_frames_per_scene: 500`, add cameras/conditions) and re-running.
+
+## Stop / resume
+
+Ctrl-C any time. Each scene writes a `_COMPLETE` marker only on full success;
+re-running skips completed scenes and continues. To check status without
+generating:
+
+```bash
+python dataset_builder.py --config dataset_config.yaml --verify
 ```
 
-and paste, at the beginning of the file, the blocks written in
+This also (re)builds `splits/{train,val,test}.txt` from completed scenes.
+
+## Output layout
 
 ```
-config/carla/Defalt.Package.json
+dataset/
+  manifest.json                 # the frozen plan (scene -> condition -> split)
+  logs/build_YYYYMMDD_HHMMSS.log
+  scenes/scene_0000/
+    calib.yaml                  # intrinsics, extrinsics, frame convention
+    condition.yaml              # weather/time used (traceability)
+    ego_poses.csv               # per-frame ego world pose
+    lidar/frame_000000.bin      # float32 (N,4) x,y,z,intensity, RH lidar frame
+    images/frame_000000_cam_front.png
+    labels/frame_000000.json    # cones: instance_id, class, position (RH lidar)
+    _COMPLETE                   # written only after the scene fully succeeds
+  splits/{train,val,test}.txt   # split BY SCENE (never by frame)
 ```
-provided by this repository.
 
-### 3. Launch the server and spawn the entities
+## Notes
 
-Given the .mat file provided, launch the server and **after that** launch the script. Make sure you're executing it using **Python 3.10** othwerwise carla module import will fail.
-
-```
-python3 carla_spawn_track.py
-```
-
+- Splits are per-scene: a whole CARLA scenario lands in exactly one split, so
+  near-identical consecutive frames can't leak between train and val.
+- The BEV heatmap is **not** saved; generate it in the PyTorch `Dataset` so you
+  can tune sigma/resolution without re-rasterizing everything.
+- Conditions cycle across scenes. Add weather entries in the config to diversify
+  (the schedule calls for varied lighting/weather/curvature/speed).
