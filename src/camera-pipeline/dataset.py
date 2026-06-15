@@ -1,4 +1,12 @@
+import json
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+import torch
+from PIL import Image
+from torch.utils.data import Dataset
+from torchvision import transforms
 
 
 def gaussian_2d(shape: tuple[int, int], center: tuple[float, float], sigma: float) -> np.ndarray:
@@ -75,6 +83,102 @@ def generate_heatmap_offset_mask(
         offset_mask[cy_feat_int, cx_feat_int] = 1.0
 
 
+class WarmupDataset(Dataset):
 
+    def __init__(
+        self,
+        dataset_root: Path,
+        split_file: str,
+        image_size: Tuple[int, int] = (640, 640),
+        heatmap_stride: int = 4,
+        num_classes: int = 2,
+        gaussian_sigma: float = 2.0,
+        augment: bool = False,
+        precomputed_heatmaps: bool = False,
+
+        #parametri per augmentation (usati solo se augment=True)
+        color_jitter_params: Optional[Dict] = None,
+        gaussian_noise_std: float = 0.0,
+    ):
+        
+        self.dataset_root = Path(dataset_root)
+        self.image_size = image_size
+        self.heatmap_stride = heatmap_stride
+        self.num_classes = num_classes
+        self.gaussian_sigma = gaussian_sigma
+        self.augment = augment
+        self.precomputed_heatmaps = precomputed_heatmaps
+
+
+        #cerca lista dei sample dallo split file
+        split_path = self.dataset_root / split_file
+        with open(split_path, "r") as f: self.sample_ids = [line.strip() for line in f if line.strip()]
+
+        self.image_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ])
+
+        self.color_jitter_params = None
+        if augment and color_jitter_params is not None:
+            self.color_jitter_params = transforms.ColorJitter(**color_jitter_params)
+
+        self.gaussian_noise_std = gaussian_noise_std if augment else 0.0
+
+    def __len__(self) -> int:
+        return len(self.sample_ids)
+
+    def _sample_path(self, sample_id: str) -> Path:
+        #ritorna il path della cartella del sample dato l'id del sample
+        return self.dataset_root / "sequences" / sample_id
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        sample_id = self.sample_ids[idx]
+        sample_dir = self._sample_path(sample_id)
+
+        #carica immagine
+        img_path = sample_dir / "camera_left.png"
+        image = Image.open(img_path).convert("RGB") 
+
+
+        #verifica dimensione immagine, se non 640x640 ridimensionamento
+        if image.size != (self.image_size[1], self.image_size[0]):
+            image = image.resize((self.image_size[1], self.image_size[0]), Image.BILINEAR)
+
+        #color jitter augmentation
+        if self.color_jitter_params is not None:
+            image = self.color_jitter_params(image)
+
+        
+        #pil to tensor e normalizzazione
+        image_tensor = self.image_transform(image)
+
+        #rumore gaussiano
+        if self.gaussian_noise_std > 0.0:
+            noise = torch.randn_like(image_tensor) * self.gaussian_noise_std
+            image_tensor = image_tensor + noise
+
+        
+        #caricamento heatmap gt
+
+        cones_path = sample_dir / "cones_camera_2d.json"
+        with open(cones_path, "r") as f:
+            cones_data = json.load(f)
+        heatmap, offset, offset_mask = generate_heatmap_offset_mask(
+            cones_data["cones_in_image"],
+            self.image_size,
+            self.heatmap_stride,
+            self.num_classes,
+            self.gaussian_sigma,
+        )
+
+        return {
+            "image": image_tensor,
+            "heatmap": torch.from_numpy(heatmap),
+            "offset": torch.from_numpy(offset),
+            "offset_mask": torch.from_numpy(offset_mask),
+            "sample_id": sample_id,
+        }
+    
 
 
