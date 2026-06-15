@@ -8,6 +8,9 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
 
 def gaussian_2d(shape: tuple[int, int], center: tuple[float, float], sigma: float) -> np.ndarray:
     
