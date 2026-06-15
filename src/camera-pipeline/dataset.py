@@ -164,16 +164,34 @@ class WarmupDataset(Dataset):
         
         #caricamento heatmap gt
 
-        cones_path = sample_dir / "cones_camera_2d.json"
-        with open(cones_path, "r") as f:
-            cones_data = json.load(f)
-        heatmap, offset, offset_mask = generate_heatmap_offset_mask(
-            cones_data["cones_in_image"],
-            self.image_size,
-            self.heatmap_stride,
-            self.num_classes,
-            self.gaussian_sigma,
-        )
+        #controllo se usare heatmap precomputate o generare tutto al volo dal JSON
+        if self.precomputed_heatmaps:
+            heatmap_path = sample_dir / "heatmap_2d.npy" #implementare script in futuro
+            heatmap = np.load(heatmap_path).astype(np.float32)
+            #per offset/mask abbiamo bisogno dei coni: leggiamo comunque il json
+            cones_path = sample_dir / "cones_camera_2d.json"
+            with open(cones_path, "r") as f:
+                cones_data = json.load(f)
+            _, offset, offset_mask = generate_heatmap_offset_mask(
+                cones_data["cones_in_image"],
+                self.image_size,
+                self.heatmap_stride,
+                self.num_classes,
+                self.gaussian_sigma,
+            )
+        else:
+            #genera tutto dal JSON
+            cones_path = sample_dir / "cones_camera_2d.json"
+            with open(cones_path, "r") as f:
+                cones_data = json.load(f)
+            heatmap, offset, offset_mask = generate_heatmap_offset_mask(
+                cones_data["cones_in_image"],
+                self.image_size,
+                self.heatmap_stride,
+                self.num_classes,
+                self.gaussian_sigma,
+            )
+
 
         return {
             "image": image_tensor,
