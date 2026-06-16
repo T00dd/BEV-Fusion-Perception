@@ -60,4 +60,43 @@ class OffsetL1Loss(nn.Module):
         return loss
     
 
+class WarmupLoss(nn.Module):
 
+    #loss combinata: focal loss + offset loss    
+
+    def __init__(
+        self,
+        focal_weight: float = 1.0,
+        offset_weight: float = 0.1,
+        focal_alpha: float = 2.0,
+        focal_beta: float = 4.0,
+    ):
+        
+        super().__init__()
+        self.focal_weight = focal_weight
+        self.offset_weight = offset_weight
+        self.focal_loss = CenterNetFocalLoss(alpha=focal_alpha, beta=focal_beta)
+        self.offset_loss = OffsetL1Loss()
+
+
+    def forward(self, 
+                predictions: Dict[str, torch.Tensor],
+                targets: Dict[str, torch.Tensor]
+                ) -> Tuple[torch.Tensor, Dict[str, float]]:
+
+        #ritorna:
+        #loss totale che è un scalar tensor per il backpropagation
+        #log_dict con i valori di focal loss e offset loss per monitoraggio con logging
+
+        loss_focal = self.focal_loss(predictions["heatmap_logits"], targets["heatmap"])
+        loss_offset = self.offset_loss(predictions["offset_pred"], targets["offset"], targets["offset_mask"])
+
+        total_loss = self.focal_weight * loss_focal + self.offset_weight * loss_offset
+
+        log_dict = {
+            "loss_focal": loss_focal.item(),
+            "loss_offset": loss_offset.item(),
+            "total_loss": total_loss.item()
+        }
+
+        return total_loss, log_dict
