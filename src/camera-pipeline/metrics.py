@@ -129,3 +129,46 @@ def match_detections_to_gt(
     return true_positives, false_positives, false_negatives
 
 
+def compute_metrics(
+        all_tp: List[Dict],
+        all_fp: List[Dict], 
+        all_fn: List[Dict],
+) -> Dict[str, float]:
+
+    #calcolo di precision, recall, F1 e l'errore in base alla distanza
+
+    tp_count = len(all_tp)
+    fp_count = len(all_fp)
+    fn_count = len(all_fn)
+
+    precision = tp_count / max(tp_count + fp_count, 1)
+    recall = tp_count / max(tp_count + fn_count, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-6)
+
+    metrics = {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "tp": tp_count,
+        "fp": fp_count,
+        "fn": fn_count,
+    }
+
+    #stratificazione per distanza
+
+    areas = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 100)]
+    for lo, hi in areas:
+        tp_in_bin = sum(1 for d in all_tp if lo <= d.get("gt_depth_m", -1) < hi)
+        fn_in_bin = sum(1 for d in all_fn if lo <= d.get("depth_m", -1) < hi)
+        total_gt = tp_in_bin + fn_in_bin
+        recall_bin = tp_in_bin / max(total_gt, 1)
+        metrics[f"recall_{lo}-{hi}m"] = recall_bin
+        metrics[f"num_gt_{lo}-{hi}m"] = total_gt
+
+    return metrics
+
+
+
+
+
+
