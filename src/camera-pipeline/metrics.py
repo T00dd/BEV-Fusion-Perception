@@ -4,7 +4,7 @@
 
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
  
 import numpy as np
 import torch
@@ -63,4 +63,69 @@ def extract_peaks_from_heatmap(
             })
 
     return detections
+
+
+def match_detections_to_gt(
+        detections: List[Dict],
+        ground_truth: List[Dict],
+        match_radius_px: float = 10.0
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    
+    #asxocia detections a coni nel gt usando una soglia minima di distanza
+    #restituisce TP, FP, FN
+
+    color_to_class = {"blue": 0, "yellow" : 1}
+
+    gt_items = []
+
+    for cone in ground_truth:
+        
+        if not cone.get("fully_in_image", True):
+            continue
+
+        cls = color_to_class.get(cone["color"])
+
+        if cls is None:
+            continue
+
+        x, y = cone["center_px"]
+
+        gt_items.append({
+            "class": cls,
+            "x_px": x,
+            "y_px" : y,
+            "depth_m": cone.get("depth_m", -1),
+            "matched": False,
+        })
+
+    #ordina detection per score decrescente
+
+    detections_sorted = sorted(detections, key=lambda d: -d["score"])
+
+    true_positives = []
+    false_positives = []
+
+
+    for det in detections_sorted:
+        best_idx = -1
+        best_dist = float("inf")
+        for i, gt in enumerate(gt_items):
+            if gt["matched"]:
+                continue
+            if gt["class"] != det["class"]:
+                continue
+            dist = np.sqrt((det["x_px"] - gt["x_px"]) ** 2 + (det["y_px"] - gt["y_px"]) ** 2)
+            if dist < match_radius_px and dist < best_dist:
+                best_dist = dist
+                best_idx = i
+        if best_idx >= 0:
+            gt_items[best_idx]["matched"] = True
+            true_positives.append({**det, "gt_depth_m": gt_items[best_idx]["depth_m"]})
+        else:
+            false_positives.append(det)
+    
+    false_negatives = [gt for gt in gt_items if not gt["matched"]]
+
+    return true_positives, false_positives, false_negatives
+
 
