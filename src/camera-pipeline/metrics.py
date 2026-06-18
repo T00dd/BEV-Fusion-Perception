@@ -2,7 +2,7 @@
 
 #precision, recall su detection di coni e distanza usando l'informazione di depth dai cones_2d.json
 
-
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple
  
@@ -168,7 +168,60 @@ def compute_metrics(
     return metrics
 
 
+class ValidationAccumulator:
+
+    #accumula TP, FP, FN su tutti i batch di validation per calcolare metriche globali
+
+    def __init__(self, dataset_root: Path, stride: int, threshold: float = 0.3, match_radius_px: float = 10.0):
+        self.dataset_root = Path(dataset_root)
+        self.stride = stride
+        self.threshold = threshold
+        self.match_radius_px = match_radius_px
+        self.reset()
+
+    def reset(self):
+        self.all_tp = []
+        self.all_fp = []
+        self.all_fn = []
+
+    def update(
+        self,
+        heatmap_logits: torch.Tensor,
+        offset_pred: torch.Tensor,
+        sample_ids: List[str],
+    ):
+        #si processa un batch di predizioni
+
+        heatmap_probs = torch.sigmoid(heatmap_logits)
+        batch_dim = heatmap_probs.shape[0]
 
 
+        for b in range(batch_dim):
+
+            detections = extract_peaks_from_heatmap(
+                heatmap_probs[b].cpu(),
+                offset_pred[b].cpu(),
+                stride = self.stride,
+                threshold=self.threshold,
+            )
+
+            sample_id = sample_ids[b]
+            
+            cones_path = self.dataset_root / "sequences" / sample_id / "cones_camera_2d.json"
+            with open(cones_path, "r") as f:
+                cones_data = json.load(f)
 
 
+            tp, fp, fn = match_detections_to_gt(
+                detections, 
+                cones_data["cones_in_image"],
+                match_radius_px=self.match_radius_px,
+            )
+
+            self.all_tp.extend(tp)
+            self.all_fp.extend(fp)
+            self.all_fn.extend(fn)
+
+
+    def compute(self) -> Dict[str, float]:
+        return compute_metrics(self.all_tp, self.all_fp, self.all_fn)
