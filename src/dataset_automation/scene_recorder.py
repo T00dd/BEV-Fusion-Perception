@@ -31,6 +31,22 @@ def apply_condition(world, condition):
     world.set_weather(w)
 
 
+def sensors_cfg_for_condition(cfg, condition):
+    # Return a sensor config dict for this scene, with LiDAR noise parameters folded in from the condition.
+    import copy
+    scfg = copy.deepcopy(cfg["sensors"])
+    ln = condition.get("lidar_noise", None)
+    if ln is not None:
+        if isinstance(ln, dict):
+            scfg["lidar"]["noise_stddev"] = float(ln.get("noise_stddev", 0.0))
+            if "dropoff_general_rate" in ln:
+                scfg["lidar"]["dropoff_general_rate"] = float(ln["dropoff_general_rate"])
+        else:
+            # scalar shorthand: just the std-dev in metres
+            scfg["lidar"]["noise_stddev"] = float(ln)
+    return scfg
+
+
 def scene_is_complete(scene_dir):
     # Check if the scene has been fully recorded by looking for the _COMPLETE marker file
     marker = Path(scene_dir) / COMPLETE_MARKER
@@ -90,7 +106,9 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
         target_speed=cfg["ego"]["target_speed"],
         lookahead=cfg["ego"]["lookahead"])
 
-    rig = SyncSensorRig(world, vehicle, cfg["sensors"])
+    # Sensor config with this scene's LiDAR noise folded in (orthogonal to weather).
+    scene_sensors_cfg = sensors_cfg_for_condition(cfg, condition)
+    rig = SyncSensorRig(world, vehicle, scene_sensors_cfg)
 
     # Calibration is per-scene, written up front.
     _write_calib(scene_dir, rig, condition)
@@ -133,9 +151,16 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
                 cv.imwrite(str(scene_dir / "images" / f"{stem}_cam_{cam_name}.png"),
                            cam["image"])
 
-            # Annotations in right-handed lidar frame
+            # Annotations in right-handed lidar frame. Pass the point cloud so
+            # each cone box gets a num_lidar_points count, and the cone cfg so
+            # box dimensions / z-convention come from one config place.
             ann = extract_frame_annotations(
-                world, data["lidar_world_transform"], cfg["grid"]["extent"])
+                world,
+                data["lidar_world_transform"],
+                cfg["grid"]["extent"],
+                cone_cfg=cfg.get("cones", {}),
+                lidar_points_rh=data["lidar"]["points_rh"],
+            )
             with open(scene_dir / "labels" / f"{stem}.json", "w") as f:
                 json.dump({"frame": idx, "cones": ann}, f)
 
