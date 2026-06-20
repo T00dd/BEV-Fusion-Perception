@@ -17,6 +17,7 @@ class SyncSensorRig:
         self.cam_intrinsics = {}   # name -> 3x3 K
         self.cam_extrinsics = {}   # name -> 4x4 (cam<-ego) at spawn
         self.lidar_mount = None    # carla.Transform relative to ego
+        self.front_crop_halfdeg = None  # set by _spawn_lidar from config
 
         bp_lib = world.get_blueprint_library()
         self._spawn_lidar(bp_lib)
@@ -33,12 +34,33 @@ class SyncSensorRig:
         bp.set_attribute("upper_fov", str(lc["upper_fov"]))
         bp.set_attribute("lower_fov", str(lc["lower_fov"]))
         bp.set_attribute("rotation_frequency", str(lc["rotation_frequency"]))
-        if lc.get("noise_stddev", 0.0) > 0.0:
-            bp.set_attribute("noise_stddev", str(lc["noise_stddev"]))
-        else:
+
+        # Measurement noise (Type A: per-ray range jitter) 
+        # Applied at the sensor: the std-dev (metres) of gaussian noise along
+        # each ray. Driven per-scene from the condition (see scene_recorder).
+        noise = float(lc.get("noise_stddev", 0.0))
+        if noise > 0.0:
+            bp.set_attribute("noise_stddev", str(noise))
+
+        # Point dropout (Type B: lost returns) 
+        # When we want a CLEAN cloud (noise==0 and dropout explicitly off) we
+        # zero out CARLA's stochastic dropoff so cones keep every point.
+        dropoff = float(lc.get("dropoff_general_rate", 0.0))
+        if noise <= 0.0 and dropoff <= 0.0:
             bp.set_attribute("dropoff_general_rate", "0.0")
             bp.set_attribute("dropoff_intensity_limit", "1.0")
             bp.set_attribute("dropoff_zero_intensity", "0.0")
+        else:
+            bp.set_attribute("dropoff_general_rate", str(dropoff))
+
+        # --- Front-sector crop (emulate a forward-facing solid-state) -------
+        # CARLA's ray_cast always spins 360 deg. We optionally keep only the
+        # front azimuthal sector in post (grab()). Store the half-angle here.
+        fc = lc.get("front_crop", None)
+        if fc and fc.get("enabled", False):
+            self.front_crop_halfdeg = float(fc.get("half_angle_deg", 60.0))
+        else:
+            self.front_crop_halfdeg = None
 
         mount = carla.Transform(carla.Location(
             x=lc["mount"]["x"], y=lc["mount"]["y"], z=lc["mount"]["z"]))
@@ -99,6 +121,15 @@ class SyncSensorRig:
         pts = np.frombuffer(raw.raw_data, dtype=np.float32).reshape(-1, 4).copy()
         xyz = lidar_points_to_rh(pts[:, :3])
         points_rh = np.concatenate([xyz, pts[:, 3:4]], axis=1).astype(np.float32)
+
+        # Optional front-sector crop (emulate forward-facing solid-state).
+        # In the right-handed LiDAR frame x is forward, y is left, so azimuth
+        # measured from the +x axis is atan2(y, x). Keep |azimuth| <= half.
+        if self.front_crop_halfdeg is not None:
+            az = np.degrees(np.arctan2(points_rh[:, 1], points_rh[:, 0]))
+            keep = np.abs(az) <= self.front_crop_halfdeg
+            points_rh = points_rh[keep]
+
         out["lidar"] = {"points_rh": points_rh}
         out["lidar_world_transform"] = self.sensors["lidar"].get_transform()
 
