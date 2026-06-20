@@ -10,11 +10,9 @@ carla:
   # at rotation_frequency 20, so each tick yields one complete scan.
   fixed_delta_seconds: 0.05
 
-# grid parameters for the BEV heatmap. The grid is defined in world coordinates, and
-# the voxel size is the resolution of the heatmap. The grid is used to generate
-# the heatmap from the LiDAR point cloud. The heatmap is generated on the fly
-# in the dataloader, NOT saved here. The grid is also used to define the
-# area of interest for the dataset, and to filter out points outside the grid.
+# grid parameters for the BEV heatmap / detection range. Defined in the
+# right-handed LiDAR frame (x forward, y left, z up). Also used to crop cones
+# and (later) maps directly onto OpenPCDet's POINT_CLOUD_RANGE.
 grid:
   extent:
     x_min: 0.0
@@ -23,7 +21,17 @@ grid:
     y_max: 25.0
     z_min: -2.0
     z_max: 2.0
-  voxel_size: [0.1, 0.1, 0.15]   # metres; BEV pixel = 0.1 -> 500 x 500 grid
+  voxel_size: [0.1, 0.1, 0.15]   # metres
+
+# Cone geometry lives in one place. gt_extraction promotes each cone point to a
+# 3D box [x,y,z,dx,dy,dz,heading] using these per-class dimensions.
+cones:
+  z_is_base: true
+  dimensions:                    # metres [dx, dy, dz] = [length, width, height]
+    blue:         [0.23, 0.23, 0.32]
+    yellow:       [0.23, 0.23, 0.32]
+    orange_small: [0.23, 0.23, 0.32]
+    orange_big:   [0.28, 0.28, 0.50]
 
 scenes:
   count: 1                 # start at 1 to test end-to-end
@@ -31,7 +39,7 @@ scenes:
   split_seed: 0
 
 capture:
-  max_frames_per_scene: 100   # start small, about 100 at first
+  max_frames_per_scene: 25    # start small
   warmup_ticks: 10            # discard initial unsettled ticks
   capture_every_n_ticks: 5    # >1 to subsample (less near-duplicate frames)
 
@@ -42,40 +50,57 @@ ego:
 
 sensors:
   lidar:
-    channels: 64
+    # solid state lidar emulation
+    channels: 128
     range: 120
-    points_per_second: 500000
-    upper_fov: 22.5
-    lower_fov: -22.5
+    points_per_second: 1500000
+    upper_fov: 10.0            # narrowed to the band where cones live
+    lower_fov: -20.0
     rotation_frequency: 20
-    noise_stddev: 0.0          # set >0 to add sensor noise to some scenes
+    noise_stddev: 0.0          # per-scene override via conditions.lidar_noise
+    dropoff_general_rate: 0.0  # kept off for clean clouds unless noise is on
     mount: {x: 0.4, y: 0.0, z: 1.5}
+    front_crop:
+      enabled: true
+      half_angle_deg: 60.0     # keep |azimuth| <= 60 deg (120 deg FOV)
   cameras:
-    - name: "front"
+    # Stereo pair for the camera branch (left + right). The rig handles any
+    # number of cameras; baseline = difference in mount y.
+    - name: "left"
       width: 640
       height: 480
       fov: 90
-      mount: {x: 0.4, y: 0.0, z: 1.4, yaw: 0.0}
-    # add left/right cameras here when you want multi-view
-    # the pipeline already handles any number of cameras.
+      mount: {x: 0.4, y: -0.06, z: 1.4, yaw: 0.0}
+    - name: "right"
+      width: 640
+      height: 480
+      fov: 90
+      mount: {x: 0.4, y: 0.06, z: 1.4, yaw: 0.0}
 
-# environmental conditions to vary across scenes. The weather is set at the start of each scene
+# environmental conditions to vary across scenes. weather is set at scene start.
+# lidar_noise is orthogonal to weather: it sets per-ray range jitter (metres)
+# so we can separate weather effects (camera) from range jitter (LiDAR).
 conditions:
   - name: "noon_clear"
     weather: {cloudiness: 5, precipitation: 0, sun_altitude_angle: 75,
               fog_density: 0, wetness: 0}
+    lidar_noise: 0.0
   - name: "overcast"
     weather: {cloudiness: 80, precipitation: 0, sun_altitude_angle: 45,
               fog_density: 0, wetness: 0}
+    lidar_noise: 0.0
   - name: "light_rain"
     weather: {cloudiness: 70, precipitation: 40, sun_altitude_angle: 40,
               fog_density: 10, wetness: 50}
+    lidar_noise: {noise_stddev: 0.015, dropoff_general_rate: 0.10}
   - name: "low_sun"
     weather: {cloudiness: 10, precipitation: 0, sun_altitude_angle: 8,
               fog_density: 0, wetness: 0}
+    lidar_noise: 0.01
   - name: "dusk"
     weather: {cloudiness: 30, precipitation: 0, sun_altitude_angle: -3,
               fog_density: 5, wetness: 0}
+    lidar_noise: 0.01
 
 output:
   dataset_dir: "../../dataset"     # relative to src/dataset_automation/
