@@ -15,11 +15,13 @@ from gt_extraction import extract_frame_annotations
 from coordinate_frames import FRAME_CONVENTION
 
 from track_spawner import generate_and_spawn_track
-from centerline_pipeline import compute_centerline_carla
+from centerline_pipeline import compute_centerline_carla, draw_debug
 from pursuit_controller import PurePursuitController
 
 
 COMPLETE_MARKER = "_COMPLETE"
+
+GROUND_Z_BY_ZONE = {1: 237.0, 2: 237.0}
 
 
 def apply_condition(world, condition):
@@ -69,7 +71,7 @@ def _write_calib(scene_dir, rig, condition):
 
 
 def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
-    
+
     scene_dir = Path(scene_dir)
     (scene_dir / "lidar").mkdir(parents=True, exist_ok=True)
     (scene_dir / "images").mkdir(parents=True, exist_ok=True)
@@ -78,28 +80,41 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
     logger.info(f"[{scene_id}] applying condition '{condition['name']}'")
     apply_condition(world, condition)
 
+    # Ground height for this run's arena zone (same logic as spawn_vehicles.py).
+    zone = cfg.get("track_spawner", {}).get("zone", 1)
+    ground_z = GROUND_Z_BY_ZONE.get(zone, 237.0)
+
     #  Track + cones (cleaning previous cones incorporated)
     logger.info(f"[{scene_id}] generating + spawning track")
     cones, start_x, start_y, scale, cone_actors = generate_and_spawn_track()
 
-    # Centerline -> waypoints
     repo_root = Path(__file__).resolve().parents[2]
     waypoints = compute_centerline_carla(
-        cones, start_x, start_y,
-        carla_scale=scale,
+        cones,
+        0.0,                       # start_x neutralised
+        0.0,                       # start_y neutralised
+        carla_scale=1.0,           # no scaling
         data_dir=repo_root / "data",
         reconstructor_bin=repo_root / "build/track_to_centerline",
+        z=ground_z,                # centerline at the zone's ground height
     )
 
-    # Spawn ego at first waypoint, facing the path.
+    # Draw the centerline so the server view shows where the car should drive.
+    # Lifetime spans the whole scene so it stays visible during recording.
+    draw_debug(world, waypoints, life_time=120.0)
+
+    # Spawn ego at first waypoint, facing the path, at ground height.
     bp = world.get_blueprint_library().find(cfg["ego"]["blueprint"])
     first = waypoints[0]
     ahead = waypoints[min(5, len(waypoints) - 1)]
     yaw = math.degrees(math.atan2(ahead[1] - first[1], ahead[0] - first[0]))
     tf = carla.Transform(
-        carla.Location(x=float(first[0]), y=float(first[1]), z=float(first[2]) + 1.0),
+        carla.Location(x=float(first[0]), y=float(first[1]), z=ground_z + 0.5),
         carla.Rotation(yaw=yaw))
     vehicle = world.spawn_actor(bp, tf)
+    logger.info(f"[{scene_id}] ego spawn z={tf.location.z:.1f}, "
+                f"first wp=({first[0]:.1f},{first[1]:.1f},{first[2]:.1f}), "
+                f"ground_z={ground_z:.1f}")
 
     controller = PurePursuitController(
         waypoints,
