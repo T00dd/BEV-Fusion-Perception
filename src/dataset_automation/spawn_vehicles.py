@@ -21,6 +21,8 @@ from track_spawner import generate_and_spawn_track
 from centerline_pipeline import compute_centerline_carla, draw_debug
 from pursuit_controller import PurePursuitController
 
+GROUND_Z_BY_ZONE = {1: 237.0, 2: 237.0}
+
 
 def main():
     actor_list = []
@@ -39,6 +41,10 @@ def main():
             ctrl_cfg = config.get("controller", {}) or {}
             target_speed = ctrl_cfg.get("target_speed", 8.0)
             lookahead = ctrl_cfg.get("lookahead", 6.0)
+            # which arena zone the track is spawned in (1 or 2)
+            zone = config.get("track_spawner", {}).get("zone", 1)
+
+        ground_z = GROUND_Z_BY_ZONE.get(zone, 237.0)
 
         # Once we have a client we can retrieve the world that is currently
         # running.
@@ -48,7 +54,6 @@ def main():
         settings = world.get_settings()
         traffic_manager = client.get_trafficmanager(8000)
         traffic_manager.set_synchronous_mode(True)
-        # disable traffic lights to avoid stopping the vehicle
         traffic_manager.set_random_device_seed(0)
 
         # with this delta we are simulating in real time, not sped up. since a lidar frame at this speed is not a complete pointcloud, we'll need to keep
@@ -65,27 +70,31 @@ def main():
             color = random.choice(bp.get_attribute('color').recommended_values)
             bp.set_attribute('color', color)
 
-        # track + centerline generation
-        cones, start_x, start_y, carla_scale, cone_actors = generate_and_spawn_track()
+        # track and centerline generation (randomized with seeds)
+        scene_seed = int(time.time()) & 0xFFFF
+
+        cones, ref_x, ref_y, carla_scale, cone_actors = generate_and_spawn_track(
+            seed=scene_seed
+        )
 
         waypoints = compute_centerline_carla(
             cones,
-            start_x,
-            start_y,
-            carla_scale=carla_scale,
+            0.0,                       # start_x neutralised
+            0.0,                       # start_y neutralised
+            carla_scale=1.0,           # no scaling
             data_dir=DATA_DIR,
-            reconstructor_bin=RECONSTRUCTOR_BIN
+            reconstructor_bin=RECONSTRUCTOR_BIN,
+            z=ground_z,                # centerline at the zone's ground height
         )
 
-        # darw the centerline for debugging
+        # draw the centerline for debugging
         draw_debug(world, waypoints, life_time=60.0)
 
-        # spwan the vehicle ath the first waypoint, oriented towards the second waypoint
         first = waypoints[0]
-        ahead = waypoints[min(5, len(waypoints)-1)]
+        ahead = waypoints[min(5, len(waypoints) - 1)]
         yaw_deg = math.degrees(math.atan2(ahead[1] - first[1], ahead[0] - first[0]))
         spaw_tf = carla.Transform(
-            carla.Location(x=float(first[0]), y=float(first[1]), z=float(first[2]) + 1.0),
+            carla.Location(x=float(first[0]), y=float(first[1]), z=ground_z + 0.5),
             carla.Rotation(yaw=yaw_deg)
         )
 
