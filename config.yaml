@@ -8,30 +8,22 @@ send position: true
 
 # Track spawner parameters
 track_spawner:
-  enabled: true                      # attiva/disattiva lo spawn
-  ground_z: 237.0                    # quota del terreno dello spiazzo
+  enabled: true
+  zone: 2                           
+  ground_z: 237.0                    # z-coordinate of the cone spawn
 
-  # --- forma e larghezza della pista ---
-  track_width: 4.5                   # larghezza carreggiata in metri (3-4)
-  missing_cone_ratio: 0.17            # frazione di coni rimossi a caso (0-1)
-  edge_margin: 1                   # distanza minima dei coni dal bordo del poligono
-  length_fill: 1                   # quanto il tracciato si estende lungo l'asse lungo (0-1)
-  amp_fill_min: 0.9                  # min uso della larghezza (oscillazione minima)
-  amp_fill_max: 0.95                  # max uso della larghezza (oscillazione massima)
-  lobes_min: 8                       # min numero di curve a S
-  lobes_max: 9                       # max numero di curve a S
+  track_width: 4.5                   
+  missing_cone_ratio: 0.17           
+  edge_margin: 1                   # minimum distance of the cones from the polygon edge
+  length_fill: 1                   # track extension factor
+  amp_fill_min: 0.9                  # minimum usage of width
+  amp_fill_max: 0.95                  # max usage of width
+  lobes_min: 8                       # minimum number of S curves
+  lobes_max: 9                       # maximum number of S curves
 
-  # --- blueprint dei coni ---
   cone_blueprint_left: "static.prop.bluecone"
   cone_blueprint_right: "static.prop.yellowcone"
 
-  # --- poligono dello spiazzo (4 vertici, ordine perimetrale) ---
-  arena_corners:
-    - [-65.3, 111.2]
-    - [-30.8, 119.1]
-    - [5.0,   -24.1]
-    - [-30.8, -32.0]
- 
 # Controller
 controller:
   target_speed: 8.0        # m/s

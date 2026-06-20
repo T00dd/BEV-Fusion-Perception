@@ -20,39 +20,54 @@ from track_generator import Mode, SimType, TrackGenerator
 # open-loop track extends forward across the long axis and fills the rectangle.
 DEFAULT_START_X = -12.9
 DEFAULT_START_Y = -23.1
-DEFAULT_GROUND_Z = 237.0          # real ground height of the elevated arena
+DEFAULT_GROUND_Z = 237.0          
 DEFAULT_BP_LEFT = "static.prop.bluecone"
 DEFAULT_BP_RIGHT = "static.prop.yellowcone"
 
-# Arena polygon: 4 ground vertices (x, y) in walking order around the perimeter.
-DEFAULT_ARENA_CORNERS = [
-    (-65.3, 111.2),   # top-left
-    (-30.8, 119.1),   # top-right
-    (5.0,   -24.1),   # bottom-right
-    (-30.8, -32.0),   # bottom-left
-]
+# Arena polygons: 4 ground vertices (x, y) in perimeter order, per zone.
+# zone 1 = box & paddocks, zone 2 = woodside.
+ARENA_ZONES = {
+    1: [
+        (-65.3, 111.2),
+        (-30.8, 119.1),
+        (5.0,   -24.1),
+        (-30.8, -32.0),
+    ],
+    2: [
+        (-87.31,  133.90),
+        (-37.45,  -66.45),
+        (-79.4,  -32.16),
+        (-118.92, 133.90),
+    ],
+}
+
+DEFAULT_ZONE = 1
+# Backward-compat default (zone 1).
+DEFAULT_ARENA_CORNERS = ARENA_ZONES[DEFAULT_ZONE]
 
 # Reject tracks whose y-extent (the long axis of the rectangle) is below this
-# fraction of the arena's y-span -> enforces "use the full length".
+# fraction of the arena's y-span
+# enforces "use full-length"
 DEFAULT_MIN_Y_FRACTION = 0.5
 
 
 def load_spawner_config():
     cfg = {
         "enabled": True,
+        "zone": DEFAULT_ZONE,        
         "ground_z": DEFAULT_GROUND_Z,
         "cone_blueprint_left": DEFAULT_BP_LEFT,
         "cone_blueprint_right": DEFAULT_BP_RIGHT,
         "arena_corners": DEFAULT_ARENA_CORNERS,
-        # --- track generation parameters (now read from YAML) ---
-        "track_width": 3.5,          # lane width in metres (3-4)
-        "missing_cone_ratio": 0.0,   # fraction of cones randomly dropped
-        "edge_margin": 2.5,          # min distance of cones from polygon edge
-        "length_fill": 0.9,          # fraction of the long axis the track spans
-        "amp_fill_min": 0.6,         # min width usage of the short axis
-        "amp_fill_max": 0.9,         # max width usage of the short axis
-        "lobes_min": 3,              # min number of S-bends
-        "lobes_max": 6,              # max number of S-bends
+        # track generation parameters from YAML
+        "track_width": 3.5,
+        "missing_cone_ratio": 0.0,  
+        "edge_margin": 2.5,          
+        "length_fill": 0.9,          
+        "amp_fill_min": 0.6,         
+        "amp_fill_max": 0.9,         
+        "lobes_min": 3,              
+        "lobes_max": 6,              
     }
     try:
         with open(MAIN_CONFIG, "r") as f:
@@ -120,17 +135,7 @@ def get_arena_polygon(sp_cfg):
 
 def check_track_in_arena(cones, start_x, start_y, arena_poly,
                          margin=2.0, min_y_fraction=0.5):
-    """
-    PASS/FAIL test for a generated track. NO scaling: cones are placed at
-    world = (start_x + cx, start_y + cy), preserving the generator's real-metre
-    proportions (3 m lane width, 5 m spacing).
-
-    Raises RuntimeError (caught by the retry loop) if the track is unacceptable:
-      1. any cone falls outside the arena polygon (eroded by `margin`), or
-      2. the track's y-extent is below `min_y_fraction` of the arena's y-span
-         (i.e. it doesn't run far enough along the long axis).
-    Returns silently if the track is good.
-    """
+    
     if arena_poly is None:
         return
 
@@ -183,10 +188,7 @@ def draw_arena(world, corners, z=237.0, life_time=60.0):
 
 
 def spawn_track(cones, bp_left_id, bp_right_id, ground_z):
-    """
-    Spawn cones. The procedural generator already outputs WORLD coordinates
-    inside the polygon, so we place them directly -- no start_x/start_y offset.
-    """
+    
     cones_left = cones["cones_left"]
     cones_right = cones["cones_right"]
 
@@ -223,12 +225,7 @@ def spawn_track(cones, bp_left_id, bp_right_id, ground_z):
 
 def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
                              track_width=None):
-    """
-    Procedural serpentine GUARANTEED inside the arena polygon. Parameters are
-    read from the YAML (track_spawner section); `seed`, `missing_cone_ratio`
-    and `track_width` may be passed to OVERRIDE the YAML per scene (e.g. to
-    randomise width across scenes). If left None, the YAML values are used.
-    """
+    
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
 
     sp_cfg = load_spawner_config()
@@ -236,7 +233,16 @@ def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
     spawning_enabled = sp_cfg["enabled"]
     bp_left_id = sp_cfg["cone_blueprint_left"]
     bp_right_id = sp_cfg["cone_blueprint_right"]
-    arena_corners = sp_cfg.get("arena_corners")
+
+    # Pick which arena to use from "zone"
+    zone = sp_cfg.get("zone", DEFAULT_ZONE)
+    if zone not in ARENA_ZONES:
+        raise RuntimeError(
+            f"[track_spawner] Unknown zone {zone}. Valid zones: "
+            f"{sorted(ARENA_ZONES.keys())}."
+        )
+    arena_corners = ARENA_ZONES[zone]
+    print(f"[track_spawner] Using zone {zone}.")
 
     # YAML values, with optional per-call override.
     if missing_cone_ratio is None:
