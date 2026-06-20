@@ -16,22 +16,43 @@ from repo_paths import (
 sys.path.insert(0, str(TRACK_GENERATOR_DIR))
 from track_generator import Mode, SimType, TrackGenerator
 
-DEFAULT_START_X = 75.8
-DEFAULT_START_Y = 132.5
-DEFAULT_CARLA_SCALE = 2.0
-DEFAULT_BP_LEFT = "static.prop.blue_cone"
-DEFAULT_BP_RIGHT = "static.prop.yellow_cone"
+# Anchor the START at the LOW-Y EXTREME of the arena (not the centre), so the
+# open-loop track extends forward across the long axis and fills the rectangle.
+DEFAULT_START_X = -12.9
+DEFAULT_START_Y = -23.1
+DEFAULT_GROUND_Z = 237.0          # real ground height of the elevated arena
+DEFAULT_BP_LEFT = "static.prop.bluecone"
+DEFAULT_BP_RIGHT = "static.prop.yellowcone"
+
+# Arena polygon: 4 ground vertices (x, y) in walking order around the perimeter.
+DEFAULT_ARENA_CORNERS = [
+    (-65.3, 111.2),   # top-left
+    (-30.8, 119.1),   # top-right
+    (5.0,   -24.1),   # bottom-right
+    (-30.8, -32.0),   # bottom-left
+]
+
+# Reject tracks whose y-extent (the long axis of the rectangle) is below this
+# fraction of the arena's y-span -> enforces "use the full length".
+DEFAULT_MIN_Y_FRACTION = 0.5
 
 
 def load_spawner_config():
     cfg = {
         "enabled": True,
-        "scale": DEFAULT_CARLA_SCALE,
-        "start_x": DEFAULT_START_X,
-        "start_y": DEFAULT_START_Y,
-        "fit_to_map": True,
+        "ground_z": DEFAULT_GROUND_Z,
         "cone_blueprint_left": DEFAULT_BP_LEFT,
         "cone_blueprint_right": DEFAULT_BP_RIGHT,
+        "arena_corners": DEFAULT_ARENA_CORNERS,
+        # --- track generation parameters (now read from YAML) ---
+        "track_width": 3.5,          # lane width in metres (3-4)
+        "missing_cone_ratio": 0.0,   # fraction of cones randomly dropped
+        "edge_margin": 2.5,          # min distance of cones from polygon edge
+        "length_fill": 0.9,          # fraction of the long axis the track spans
+        "amp_fill_min": 0.6,         # min width usage of the short axis
+        "amp_fill_max": 0.9,         # max width usage of the short axis
+        "lobes_min": 3,              # min number of S-bends
+        "lobes_max": 6,              # max number of S-bends
     }
     try:
         with open(MAIN_CONFIG, "r") as f:
@@ -43,10 +64,27 @@ def load_spawner_config():
     return cfg
 
 
+EXISTING_CONE_BLUEPRINTS = (
+    "static.prop.bluecone", "static.prop.yellowcone",
+    "static.prop.orangecone", "static.prop.redcone",
+)
+CONE_MESH_KEYS = ("BlueCone", "OrangeCone", "YellowCone", "RedCone")
+
+
 def clean_previous_track(world, client=None):
-    all_actors = world.get_actors()
-    cone_actors = [a for a in all_actors if "cone" in a.type_id.lower()]
+    cone_actors = []
+    for a in world.get_actors():
+        tid = a.type_id.lower()
+        if tid in EXISTING_CONE_BLUEPRINTS or "cone" in tid:
+            cone_actors.append(a)
+            continue
+        if tid == "static.prop.mesh":
+            mp = a.attributes.get("mesh_path", "")
+            if any(k in mp for k in CONE_MESH_KEYS):
+                cone_actors.append(a)
+
     if not cone_actors:
+        print("[track_spawner] No pre-existing cones to remove.")
         return
 
     if client is not None:
@@ -59,8 +97,7 @@ def clean_previous_track(world, client=None):
                 a.destroy()
             except RuntimeError:
                 pass
-
-    print(f"Destroyed {len(cone_actors)} existing cone actors from previous track.")
+    print(f"[track_spawner] Removed {len(cone_actors)} pre-existing cone(s).")
 
 
 def _resolve_blueprint(blueprints, bp_id):
@@ -73,54 +110,83 @@ def _resolve_blueprint(blueprints, bp_id):
     return matches[0]
 
 
-def get_map_bounds(world, margin=5.0):
-    spawn_points = world.get_map().get_spawn_points()
-    if not spawn_points:
+def get_arena_polygon(sp_cfg):
+    corners = sp_cfg.get("arena_corners")
+    if not corners or len(corners) < 3:
         return None
-    xs = [sp.location.x for sp in spawn_points]
-    ys = [sp.location.y for sp in spawn_points]
-    return (min(xs) + margin, max(xs) - margin,
-            min(ys) + margin, max(ys) - margin)
+    from shapely.geometry import Polygon
+    return Polygon([(float(x), float(y)) for (x, y) in corners])
 
 
-def fit_scale_to_map(cones, start_x, start_y, scale, world):
-    bounds = get_map_bounds(world)
-    if bounds is None:
-        print("[track_spawner] Could not determine map bounds; skipping fit check.")
-        return scale
+def check_track_in_arena(cones, start_x, start_y, arena_poly,
+                         margin=2.0, min_y_fraction=0.5):
+    """
+    PASS/FAIL test for a generated track. NO scaling: cones are placed at
+    world = (start_x + cx, start_y + cy), preserving the generator's real-metre
+    proportions (3 m lane width, 5 m spacing).
 
-    min_x, max_x, min_y, max_y = bounds
+    Raises RuntimeError (caught by the retry loop) if the track is unacceptable:
+      1. any cone falls outside the arena polygon (eroded by `margin`), or
+      2. the track's y-extent is below `min_y_fraction` of the arena's y-span
+         (i.e. it doesn't run far enough along the long axis).
+    Returns silently if the track is good.
+    """
+    if arena_poly is None:
+        return
+
+    from shapely.geometry import Point
+
+    safe = arena_poly.buffer(-margin) if margin > 0 else arena_poly
+    if safe.is_empty:
+        raise RuntimeError("[track_spawner] Arena too small for the margin.")
+
+    if not safe.contains(Point(start_x, start_y)):
+        raise RuntimeError(
+            f"[track_spawner] start ({start_x:.1f},{start_y:.1f}) outside arena."
+        )
+
     all_cones = list(cones["cones_left"]) + list(cones["cones_right"])
     if not all_cones:
-        return scale
+        raise RuntimeError("[track_spawner] Empty track.")
 
-    max_off_x = max(abs(c[0]) for c in all_cones)
-    max_off_y = max(abs(c[1]) for c in all_cones)
+    world_pts = [(start_x + c[0], start_y + c[1]) for c in all_cones]
 
-    room_x = min(max_x - start_x, start_x - min_x)
-    room_y = min(max_y - start_y, start_y - min_y)
+    # Check 1: containment
+    for (px, py) in world_pts:
+        if not safe.contains(Point(px, py)):
+            raise RuntimeError(
+                "[track_spawner] Track exits the arena. Retrying."
+            )
 
-    if room_x <= 0 or room_y <= 0:
+    # Check 2: runs far enough along the long (y) axis
+    ys = [p[1] for p in world_pts]
+    track_y_span = max(ys) - min(ys)
+    ay = [c[1] for c in arena_poly.exterior.coords]
+    arena_y_span = max(ay) - min(ay)
+    if track_y_span < min_y_fraction * arena_y_span:
         raise RuntimeError(
-            f"Start position ({start_x}, {start_y}) is outside the map bounds "
-            f"x[{min_x:.1f},{max_x:.1f}] y[{min_y:.1f},{max_y:.1f}]. "
-            f"Adjust track_spawner.start_x / start_y in config.yaml."
+            f"[track_spawner] Track too short along the length "
+            f"({track_y_span:.0f} m < {min_y_fraction:.0%} of "
+            f"{arena_y_span:.0f} m). Retrying for a longer track."
         )
 
-    max_scale_x = room_x / max_off_x if max_off_x > 0 else scale
-    max_scale_y = room_y / max_off_y if max_off_y > 0 else scale
-    max_allowed = min(max_scale_x, max_scale_y)
 
-    if scale > max_allowed:
-        print(
-            f"[track_spawner] Track too large for map: requested scale {scale:.2f} "
-            f"exceeds max {max_allowed:.2f}. Shrinking to fit."
-        )
-        return max_allowed
-    return scale
+def draw_arena(world, corners, z=237.0, life_time=60.0):
+    if not corners or len(corners) != 4:
+        return
+    debug = world.debug
+    locs = [carla.Location(float(x), float(y), float(z)) for (x, y) in corners]
+    red = carla.Color(255, 0, 0)
+    for i in range(4):
+        debug.draw_line(locs[i], locs[(i + 1) % 4],
+                        thickness=0.15, color=red, life_time=life_time)
 
 
-def spawn_track(cones, start_x, start_y, scale, bp_left_id, bp_right_id):
+def spawn_track(cones, bp_left_id, bp_right_id, ground_z):
+    """
+    Spawn cones. The procedural generator already outputs WORLD coordinates
+    inside the polygon, so we place them directly -- no start_x/start_y offset.
+    """
     cones_left = cones["cones_left"]
     cones_right = cones["cones_right"]
 
@@ -135,151 +201,81 @@ def spawn_track(cones, start_x, start_y, scale, bp_left_id, bp_right_id):
 
     spawned = []
 
-    for cone_left in cones_left:
-        location = carla.Location(
-            start_x + (cone_left[0] * scale), start_y + (cone_left[1] * scale), 0.5
-        )
-        c = world.spawn_actor(model_cones_left, carla.Transform(location))
-        c.set_simulate_physics(True)
-        spawned.append(c)
+    def _spawn_side(cone_list, model):
+        for cone in cone_list:
+            location = carla.Location(
+                float(cone[0]),             # already world coords
+                float(cone[1]),
+                ground_z + 0.1,
+            )
+            c = world.try_spawn_actor(model, carla.Transform(location))
+            if c is None:
+                continue
+            c.set_simulate_physics(True)
+            spawned.append(c)
 
-    for cone_right in cones_right:
-        location = carla.Location(
-            start_x + (cone_right[0] * scale), start_y + (cone_right[1] * scale), 0.5
-        )
-        c = world.spawn_actor(model_cones_right, carla.Transform(location))
-        c.set_simulate_physics(True)
-        spawned.append(c)
+    _spawn_side(cones_left, model_cones_left)
+    _spawn_side(cones_right, model_cones_right)
 
+    print(f"[track_spawner] Spawned {len(spawned)} cones inside the polygon.")
     return spawned
 
 
-def generate_and_spawn_track():
+def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
+                             track_width=None):
+    """
+    Procedural serpentine GUARANTEED inside the arena polygon. Parameters are
+    read from the YAML (track_spawner section); `seed`, `missing_cone_ratio`
+    and `track_width` may be passed to OVERRIDE the YAML per scene (e.g. to
+    randomise width across scenes). If left None, the YAML values are used.
+    """
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
 
-    # Load track_spawner placement/scale config (main project config)
     sp_cfg = load_spawner_config()
-    start_x = sp_cfg["start_x"]
-    start_y = sp_cfg["start_y"]
-    scale = sp_cfg["scale"]
+    ground_z = sp_cfg["ground_z"]
     spawning_enabled = sp_cfg["enabled"]
     bp_left_id = sp_cfg["cone_blueprint_left"]
     bp_right_id = sp_cfg["cone_blueprint_right"]
-    fit_to_map = sp_cfg["fit_to_map"]
+    arena_corners = sp_cfg.get("arena_corners")
 
-    # Load track-generator configuration (separate file, untouched)
-    with open(TRACK_GENERATOR_CONFIG, "r") as file:
-        config = yaml.safe_load(file)
+    # YAML values, with optional per-call override.
+    if missing_cone_ratio is None:
+        missing_cone_ratio = sp_cfg["missing_cone_ratio"]
+    if track_width is None:
+        track_width = sp_cfg["track_width"]
 
-    mode_choice = config["mode"]["parameters"].lower()
-    voronoi = config["mode"]["voronoi"].upper()
-    open_loop = config["mode"]["open_loop"]
-    random_open_loop = config["mode"]["random_open_loop"]
-    behind_ratio = config["mode"]["behind_ratio"]
-    ahead_ratio = config["mode"]["ahead_ratio"]
-    missing_cone_ratio = config["mode"]["missing_cone_ratio"]
+    from procedural_track_gen import generate_serpentine_in_polygon
 
-    sim_type_str = config["simulation"]["sim_type"].upper()
-    if sim_type_str == "FSDS":
-        sim_type = SimType.FSDS
-    elif sim_type_str == "FSSIM":
-        sim_type = SimType.FSSIM
-    else:
-        sim_type = SimType.GPX
+    cones = generate_serpentine_in_polygon(
+        arena_corners,
+        track_width=track_width,
+        cone_spacing=4.0,
+        edge_margin=sp_cfg["edge_margin"],
+        seed=seed,
+        lobes_range=(sp_cfg["lobes_min"], sp_cfg["lobes_max"]),
+        amp_fill_range=(sp_cfg["amp_fill_min"], sp_cfg["amp_fill_max"]),
+        length_fill=sp_cfg["length_fill"],
+        missing_cone_ratio=missing_cone_ratio,
+    )
+    print(f"[track_spawner] Serpentine in polygon: "
+          f"{len(cones['cones_left'])}L/{len(cones['cones_right'])}R cones, "
+          f"start_side={cones.get('start_side')}, lobes={cones.get('n_lobes')}, "
+          f"width={cones.get('track_width')} m, missing={missing_cone_ratio}")
 
-    out_cfg = config["output"]
-    plot_track = out_cfg["plot_track"]
-    visualise_voronoi = out_cfg["visualise_voronoi"]
-    create_output_file = out_cfg["create_output_file"]
-    output_location = out_cfg["output_location"]
-
-    off = config["offsets"]
-    z_offset = off["z_offset"]
-    lat_offset = off["lat_offset"]
-    lon_offset = off["lon_offset"]
-
-    def randomize_params():
-        n_points = random.randint(40, 100)
-        n_regions = random.randint(10, n_points)
-        min_bound = random.uniform(0.0, 10.0)
-        max_bound = random.uniform(100.0, 200.0)
-        mode = random.choice([Mode.EXPAND, Mode.EXTEND, Mode.RANDOM])
-        return n_points, n_regions, min_bound, max_bound, mode
-
-    if mode_choice == "custom":
-        params = config["track_params"]
-        n_points = params["n_points"]
-        n_regions = params["n_regions"]
-        min_bound = params["min_bound"]
-        max_bound = params["max_bound"]
-        mode = Mode.RANDOM
-    else:
-        n_points, n_regions, min_bound, max_bound, mode = randomize_params()
-
-    max_attempts = 10
-    attempt = 0
-    success = False
-    cones = None
     cone_actors = []
+    if spawning_enabled:
+        client = carla.Client("localhost", 2000)
+        world = client.get_world()
+        draw_arena(world, arena_corners)
+        cone_actors = spawn_track(cones, bp_left_id, bp_right_id, ground_z)
+        print("Track spawned!")
+    else:
+        print("Track spawning disabled (track_spawner.enabled = false).")
 
-    while attempt < max_attempts and not success:
-        try:
-            print(f"\nAttempt {attempt + 1}: Generating track with parameters:")
-            print(
-                f"   n_points={n_points}, n_regions={n_regions}, bounds=({min_bound}, {max_bound}), mode={mode.name}"
-            )
-
-            track_gen = TrackGenerator(
-                n_points=n_points,
-                n_regions=n_regions,
-                min_bound=min_bound,
-                max_bound=max_bound,
-                mode=mode,
-                open_loop=open_loop,
-                missing_cone_ratio=missing_cone_ratio,
-                random_open_loop=random_open_loop,
-                behind_ratio=behind_ratio,
-                ahead_ratio=ahead_ratio,
-                plot_track=plot_track,
-                visualise_voronoi=visualise_voronoi,
-                create_output_file=create_output_file,
-                output_location=output_location,
-                z_offset=z_offset,
-                lat_offset=lat_offset,
-                lon_offset=lon_offset,
-                sim_type=sim_type,
-            )
-
-            cones = track_gen.create_track()
-            success = True
-            print(" Track successfully created!")
-
-            if spawning_enabled:
-                if fit_to_map:
-                    client = carla.Client("localhost", 2000)
-                    world = client.get_world()
-                    scale = fit_scale_to_map(cones, start_x, start_y, scale, world)
-
-                cone_actors = spawn_track(
-                    cones, start_x, start_y, scale, bp_left_id, bp_right_id
-                )
-                print("Track spawned!")
-            else:
-                print("Track spawning disabled in config (track_spawner.enabled = false).")
-
-        except Exception as e:
-            print(f"\nUnable to create track with the parameters above.")
-            print(f"   Reason: {e}")
-            print("   Randomizing new parameters and retrying...\n")
-            n_points, n_regions, min_bound, max_bound, mode = randomize_params()
-            attempt += 1
-            time.sleep(0.5)
-
-    if not success:
-        print("\nFailed to generate a valid track after multiple attempts.")
-        raise RuntimeError("Track generation failed")
-
-    return cones, start_x, start_y, scale, cone_actors
+    cl = cones["cones_left"]
+    ref_x = float(cl[0][0]) if len(cl) else 0.0
+    ref_y = float(cl[0][1]) if len(cl) else 0.0
+    return cones, ref_x, ref_y, 1.0, cone_actors
 
 
 if __name__ == "__main__":
