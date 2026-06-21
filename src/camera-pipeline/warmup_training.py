@@ -103,7 +103,6 @@ def train_one_epoch(
         optimizer,
         scheduler,
         loss_fn,
-        scaler,
         cfg: WarmupConfig,
         epoch: int,
         global_step_start: int,
@@ -222,7 +221,7 @@ def validate(
                 heatmaps_gt=targets["heatmap"],
                 heatmaps_pred_logits=predictions["heatmap_logits"].float(),
                 sample_ids=list(sample_ids),
-                output_dir=cfg.output_dir / "visualizations",
+                output_dir="../visualizations",
                 stride=cfg.heatmap_stride,
                 epoch=epoch,
                 max_to_save=cfg.num_visualizations_per_val,
@@ -238,3 +237,29 @@ def validate(
 
     return result
 
+
+def save_checkpoint(model, optimizer, scheduler, epoch: int, cfg: WarmupConfig, name:str):
+    
+    checkpoint_path = cfg.output_dir / name
+    torch.save({
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "config": vars(cfg) if not isinstance(cfg, dict) else cfg,
+    }, checkpoint_path)
+    print(f"[Checkpoint] Saved: {checkpoint_path}")
+
+
+def save_backbone(model, cfg:WarmupConfig, name: str = "backbone.pth"):
+    
+    #salva i pesi solo del backbone
+
+    backbone_state = {f"backbone.{k}": v for k, v in model.backbone.state_dict().items()}
+    out_path = cfg.models_dir / name
+    torch.save({
+        "backbone_state_dict": backbone_state,
+        "backbone_name": cfg.backbone_name,
+        "feature_index": cfg.feature_index,
+    }, out_path)
+    print(f"[Checkpoint] Backbone saved: {out_path}")
