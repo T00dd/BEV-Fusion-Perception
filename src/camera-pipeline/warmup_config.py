@@ -68,6 +68,8 @@ class WarmupConfig:
     log_every_n_steps: int = 50
     save_visualizations: bool = True
     num_visualizations_per_val: int = 8
+
+    grad_clip_norm: float = 1.0
     
     def __post_init__(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)
