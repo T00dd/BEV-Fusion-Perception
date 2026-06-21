@@ -24,6 +24,10 @@ class SyncSensorRig:
         for cam in cfg["cameras"]:
             self._spawn_camera(bp_lib, cam)
 
+        #depth camera (gt depth from carla) mounted with the SAME transform as the left camera so the depth map is pixel aligned with the left RGB
+        self.depth_cam_name = None
+        self._spawn_depth_camera(bp_lib)
+
     # spawn sensors in synchronous mode, with queues to hold the latest frame for each sensor
     def _spawn_lidar(self, bp_lib):
         lc = self.cfg["lidar"]
@@ -102,6 +106,48 @@ class SyncSensorRig:
         # Extrinsic: camera mount relative to ego (left-handed CARLA frame)
         self.cam_extrinsics[name] = np.array(mount.get_matrix(), dtype=np.float64)
 
+    def _spawn_depth_camera(self, bp_lib):
+        #find the left camera config to mirror its mount + resolution + fov so the depth map aligns 1:1 with the left RGB image
+        cams = self.cfg["cameras"]
+        left_cfg = next((c for c in cams if c["name"] == "left"), cams[0])
+
+        bp = bp_lib.find("sensor.camera.depth")
+        bp.set_attribute("image_size_x", str(left_cfg["width"]))
+        bp.set_attribute("image_size_y", str(left_cfg["height"]))
+        bp.set_attribute("fov", str(left_cfg["fov"]))
+
+        mount = carla.Transform(
+            carla.Location(x=left_cfg["mount"]["x"],
+                           y=left_cfg["mount"]["y"],
+                           z=left_cfg["mount"]["z"]),
+            carla.Rotation(yaw=left_cfg["mount"].get("yaw", 0.0),
+                           pitch=left_cfg["mount"].get("pitch", 0.0),
+                           roll=left_cfg["mount"].get("roll", 0.0)),
+        )
+        sensor = self.world.spawn_actor(bp, mount, attach_to=self.vehicle,
+                                        attachment_type=carla.AttachmentType.Rigid)
+        q = queue.Queue()
+        sensor.listen(q.put)
+        name = "depth_" + left_cfg["name"]
+        self.sensors[name] = sensor
+        self.queues[name] = q
+        self.depth_cam_name = name
+
+    @staticmethod
+    def _decode_depth_carla(depth_image):
+        #decode CARLA's depth encoding (BGRA, depth packed in RGB channels)
+        #into a float32 metric depth map (metres). Same formula used in the
+        #project's camera.py (cameraRgbd), kept identical for consistency
+        arr = np.frombuffer(depth_image.raw_data, dtype=np.uint8).reshape(
+            depth_image.height, depth_image.width, 4)
+        B = arr[:, :, 0].astype(np.float32)
+        G = arr[:, :, 1].astype(np.float32)
+        R = arr[:, :, 2].astype(np.float32)
+        # normalized in [0,1]; carla's far plane is 1000 m
+        normalized = (R + G * 256.0 + B * 256.0 * 256.0) / (256.0 ** 3 - 1.0)
+        depth_m = 1000.0 * normalized  # metres
+        return depth_m.astype(np.float32)
+
     def _drain_to_frame(self, q, frame_id, timeout=2.0):
         # Drain the queue until we find the frame_id we want, or a later frame
         # Return the item for that frame
@@ -140,6 +186,14 @@ class SyncSensorRig:
             arr = np.frombuffer(img.raw_data, dtype=np.uint8).reshape(
                 img.height, img.width, 4)
             out["cameras"][name] = {"image": arr[:, :, :3].copy()}  # BGRA->BGR
+
+        #depth (GT, aligned with the left RGB camera)
+        if self.depth_cam_name is not None:
+            depth_raw = self._drain_to_frame(self.queues[self.depth_cam_name], frame_id)
+            out["depth"] = {
+                "depth_m": self._decode_depth_carla(depth_raw),
+                "aligned_with": self.depth_cam_name.replace("depth_", ""),
+            }
         return out
 
     def calib_dict(self):
