@@ -205,3 +205,36 @@ def validate(
             loss, log_dict = loss_fn(predictions, targets)
 
 
+        for k, v in log_dict.items():
+            sum_losses[k] += v
+        num_batches += 1
+
+        val_accumulator.update(
+            predictions["heatmap_logits"].float(),
+            predictions["offset_pred"].float(),
+            sample_ids,
+        )
+
+        #salva visualizzazioni del primo batch
+        if cfg.save_visualizations and batch_idx == vis_batch_idx:
+            save_visualization_batch(
+                images=images,
+                heatmaps_gt=targets["heatmap"],
+                heatmaps_pred_logits=predictions["heatmap_logits"].float(),
+                sample_ids=list(sample_ids),
+                output_dir=cfg.output_dir / "visualizations",
+                stride=cfg.heatmap_stride,
+                epoch=epoch,
+                max_to_save=cfg.num_visualizations_per_val,
+            )
+
+    for k in sum_losses:
+        sum_losses[k] /= max(num_batches, 1)
+    
+    metrics = val_accumulator.compute()
+
+    result = {f"val_{k}": v for k, v in sum_losses.items()}
+    result.update({f"val_{k}": v for k, v in metrics.items()})
+
+    return result
+
