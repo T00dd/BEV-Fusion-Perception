@@ -1,5 +1,6 @@
 import random
 import sys
+import argparse
 
 from pathlib import Path
 import numpy as np
@@ -263,3 +264,169 @@ def save_backbone(model, cfg:WarmupConfig, name: str = "backbone.pth"):
         "feature_index": cfg.feature_index,
     }, out_path)
     print(f"[Checkpoint] Backbone saved: {out_path}")
+
+
+def main():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset_root", type=str, default=None, help="Override del path dataset (altrimenti usa quello del config)")
+    parser.add_argument("--output_dir", type=str, default=None, help="Override della directory di output")
+    parser.add_argument("--resume", type=str, default=None, help="Path a checkpoint da cui riprendere")
+    parser.add_argument("--overfit_test", action="store_true", help="Modalita' overfit test: usa pochi sample, tante epoche, verifica che la loss scenda a 0")
+    args = parser.parse_args()
+
+    cfg = WarmupConfig()
+
+    if args.dataset_root:
+        cfg.dataset_root = Path(args.dataset_root)
+    if args.output_dir:
+        cfg.output_dir = Path(args.output_dir)
+        cfg.output_dir.mkdir(parents=True, exist_ok=True)
+
+
+    if args.overfit_test:
+        print("[Mode] OVERFIT TEST active")
+        #test per vedere se la rete impari
+        #se la loss non scende c'è un bug nella pipeline
+        cfg.num_epochs = 200
+        cfg.batch_size = 4
+        cfg.val_every_n_epochs = 20
+        
+
+    print(f"[Config] Dataset: {cfg.dataset_root}")
+    print(f"[Config] Output: {cfg.output_dir}")
+    print(f"[Config] Epochs number: {cfg.num_epochs}")
+    print(f"[Config] Batch size: {cfg.batch_size}")
+
+    set_seed(cfg.seed)
+
+    #trova l'algoritmo + veloce per calcolare 640x640
+    torch.backends.cudnn.benchmark = True
+
+    train_loader, val_loader = build_dataloaders(cfg)
+
+
+    model = HRNet_with_detection_head(
+        backbone_name=cfg.backbone_name,
+        feature_index=cfg.feature_index,
+        num_classes=cfg.num_classes,
+        head_hidden_channels=cfg.head_hidden_channels,
+        head_num_layers=cfg.head_num_layers,
+        pretrained=True,
+    ).to("cuda")
+
+    #info modello
+    total_params = sum(p.numel() for p in model.parameters())
+    bb_params = sum(p.numel() for p in model.backbone.parameters())
+    hd_params = sum(p.numel() for p in model.head.parameters())
+    print(f"[Model] Totale parametri: {total_params/1e6:.2f}M")
+    print(f"[Model] -Backbone: {bb_params/1e6:.2f}M")
+    print(f"[Model] -Head: {hd_params/1e6:.2f}M")
+
+
+    loss_fn = WarmupLoss(
+        focal_weight=cfg.focal_loss_weight,
+        offset_weight=cfg.offset_loss_weight,
+        focal_alpha=cfg.focal_alpha,
+        focal_beta=cfg.focal_beta,
+    ).to(cfg.device)
+
+
+    #optimizer differenziato tra backbone ed head
+    param_groups = model.get_param_groups(
+        backbone_lr=cfg.backbone_lr,
+        head_lr=cfg.head_lr,
+        weight_decay=cfg.weight_decay,
+    )
+    optimizer = torch.optim.AdamW(param_groups)
+
+    #scheduler
+    scheduler= build_scheduler(optimizer, cfg, steps_per_epoch= len(train_loader))
+
+
+    #logger
+    logger = TrainingLogger(cfg.output_dir, log_every_n_steps=cfg.log_every_n_steps)
+
+    #validation accumulator
+    val_accumulator = ValidationAccumulator(
+        dataset_root=cfg.dataset_root,
+        stride=cfg.heatmap_stride,
+        threshold=0.3,
+        match_radius_px=10.0,
+    )
+
+    start_epoch = 0
+    global_step = 0
+
+    if args.resume:
+        checkpoint = torch.load(args.resume, map_location=cfg.device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        global_step = start_epoch * len(train_loader)
+        print(f"[Resume] Restarting from epoch {start_epoch}")
+
+
+    #training loop
+    best_val_f1 = 0.0
+    for epoch in range(start_epoch, cfg.num_epochs):
+        print(f"\n============ Epoch {epoch}/{cfg.num_epochs} ============")
+
+        global_step, train_losses = train_one_epoch(
+            model=model,
+            loader=train_loader,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            loss_fn=loss_fn,
+            cfg=cfg,
+            epoch=epoch,
+            global_step_start=global_step,
+            logger=logger,
+        )
+
+
+        #validation
+        if (epoch + 1) % cfg.val_every_n_epochs == 0 or epoch == cfg.num_epochs - 1:
+            val_metrics = validate(
+                model=model,
+                loader=val_loader,
+                loss_fn=loss_fn,
+                val_accumulator=val_accumulator,
+                cfg=cfg,
+                epoch=epoch,
+            )
+            
+            #combina per logging
+            epoch_summary = {f"train_{k}": v for k, v in train_losses.items()}
+            epoch_summary.update(val_metrics)
+            logger.log_epoch(epoch, epoch_summary)
+            
+            #salva il miglior modello in base a F1
+            if val_metrics.get("val_f1", 0.0) > best_val_f1:
+                best_val_f1 = val_metrics["val_f1"]
+                save_checkpoint(model, optimizer, scheduler, epoch, cfg, "best_model.pth")
+                save_backbone(model, cfg, "backbone.pth")
+
+        else: 
+            epoch_summary = {f"train_{k}": v for k, v in train_losses.items()}
+            logger.log_epoch(epoch, epoch_summary)
+
+        if (epoch + 1) % 10 == 0:
+            save_checkpoint(model, optimizer, scheduler, epoch, cfg, f"checkpoint_epoch_{epoch:03d}.pth")
+
+
+    save_checkpoint(model, optimizer, scheduler, cfg.num_epochs - 1, cfg, "full_model_final.pth")
+    save_backbone(model, cfg, "backbone_final.pth")
+    
+    logger.close()
+    print("\n[Done] Warm-up completato.")
+    print(f"Best val F1: {best_val_f1:.4f}")
+    print(f"Deliverable per script BEV: {cfg.output_dir}/backbone_only_best.pth")
+ 
+ 
+if __name__ == "__main__":
+    main()
+
+
+
