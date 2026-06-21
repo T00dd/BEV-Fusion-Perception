@@ -8,6 +8,7 @@ class WarmupConfig:
     #path
     dataset_root: Path = Path("/path/to/fsae_dataset")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
     output_dir: Path = Path("./checkpoints/warmup")
+    models_dir: Path = Path("../models")
     
     #dataset
     image_size: Tuple[int, int] = (640, 640)
