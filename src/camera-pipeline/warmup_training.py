@@ -96,5 +96,75 @@ def build_scheduler(optimizer , cfg: WarmupConfig, steps_per_epoch: int ):
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr)
 
 
+def train_one_epoch(
+        model,
+        loader,
+        optimizer,
+        scheduler,
+        loss_fn,
+        scaler,
+        cfg: WarmupConfig,
+        epoch: int,
+        global_step_start: int,
+        logger: TrainingLogger,
+):
+    
+    #esegue un epoca di training e ritorna il global_step finale
+
+    model.train()
+    device = "cuda"
+
+    global_step = global_step_start
+
+    epoch_losses = {"loss_total":0.0, "loss_focal": 0.0, "loss_offset": 0.0}
+    num_batches = 0
+
+
+    for batch in loader:
+        images = batch["image"].to(device, non_blocking=True)
+        targets = {
+            "heatmap": batch["heatmap"].to(device, non_blocking=True),
+            "offset": batch["offset"].to(device, non_blocking=True),
+            "offset_mask": batch["offset_mask"].to(device, non_blocking=True),
+        }
+
+        optimizer.zero_grad(set_to_none=True)
+
+        #rete con precisione bf16
+        with autocast(device_type="cuda", dtype=torch.bfloat16):
+            predictions = model(images)
+            loss, log_dict = loss_fn(predictions, targets)
+
+        #calcolo gradienti
+        loss.backward()
+        #taglio del gradiente per evitare la sua esplosione
+        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip_norm)
+        #aggiornamento pesi
+        optimizer.step()
+
+
+        scheduler.step()
+
+        for k, v in log_dict.items():
+            epoch_losses[k] += v
+        
+        num_batches += 1
+
+        #estraiamo il valore del LR dal modello
+        lrs = [pg["lr"] for pg in optimizer.param_groups]
+        lr_backbone = lrs[0]
+        lr_head = lrs[1] if len(lrs) > 1 else lrs[0]
+
+        #chiamiamo il logger
+        logger.log_step(epoch, global_step, log_dict, lr_backbone, lr_head)
+
+        global_step += 1
+
+    
+    for k in epoch_losses:
+        epoch_losses[k] /= max(num_batches, 1)
+    
+    return global_step, epoch_losses
+
 
 
