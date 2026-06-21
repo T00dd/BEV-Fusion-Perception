@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from torch.amp import autocast
 
 #script principale per il warmup 2d di HRNet-W32 sul task di detection dei coni
 
@@ -166,5 +167,41 @@ def train_one_epoch(
     
     return global_step, epoch_losses
 
+
+@torch.no_grad()
+def validate(
+    model,
+    loader,
+    loss_fn,
+    val_accumulator: ValidationAccumulator,
+    cfg: WarmupConfig,
+    epoch: int,
+):
+    
+    #eseguiamo validation: loss media + metriche
+
+    model.eval()
+    device = "cuda"
+
+    val_accumulator.reset()
+
+    sum_losses = {"loss_total": 0.0, "loss_focal": 0.0, "loss_offset": 0.0}
+    num_batches =0 
+
+    vis_batch_idx = 0
+
+    for batch_idx, batch in enumerate(loader):
+        images = batch["image"].to(device, non_blocking=True)
+        targets = {
+            "heatmap": batch["heatmap"].to(device, non_blocking=True),
+            "offset": batch["offset"].to(device, non_blocking=True),
+            "offset_mask": batch["offset_mask"].to(device, non_blocking=True),
+        }
+
+        sample_ids =  batch["sample_id"]
+
+        with autocast(device_type="cuda", dtype=torch.bfloat16):
+            predictions = model(images)
+            loss, log_dict = loss_fn(predictions, targets)
 
 
