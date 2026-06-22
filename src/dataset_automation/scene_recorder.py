@@ -11,8 +11,9 @@ import carla
 import yaml
 
 from sensor_capture import SyncSensorRig
-from gt_extraction import extract_frame_annotations
+from gt_extraction import extract_frame_annotations, list_cone_actors
 from coordinate_frames import FRAME_CONVENTION
+from projection_2d import project_cones_for_camera
 
 from track_spawner import generate_and_spawn_track
 from centerline_pipeline import compute_centerline_carla, draw_debug
@@ -76,6 +77,9 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
     (scene_dir / "lidar").mkdir(parents=True, exist_ok=True)
     (scene_dir / "images").mkdir(parents=True, exist_ok=True)
     (scene_dir / "labels").mkdir(parents=True, exist_ok=True)
+    #new outputs added for the camera branch: GT depth + projected 2D cones.
+    (scene_dir / "depth").mkdir(parents=True, exist_ok=True)
+    (scene_dir / "labels_2d").mkdir(parents=True, exist_ok=True)
 
     logger.info(f"[{scene_id}] applying condition '{condition['name']}'")
     apply_condition(world, condition)
@@ -178,6 +182,35 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
             )
             with open(scene_dir / "labels" / f"{stem}.json", "w") as f:
                 json.dump({"frame": idx, "cones": ann}, f)
+
+            #GT depth from carla aligned with the left RGB camera
+            if "depth" in data:
+                np.save(scene_dir / "depth" / f"{stem}.npy", data["depth"]["depth_m"])
+
+            #GT 2d: project cones into each camera image
+            #coherence with the 3D GT: keep only cones that passed the grid extent filter above
+            #the 3D annotations carry their instance_id so we reuse that set to filter the world frame cone list
+            kept_ids = {a["instance_id"] for a in ann}
+            cones_world = [
+                {"instance_id": int(aid), "class": label,
+                 "world_xyz": [loc.x, loc.y, loc.z]}
+                for (aid, label, loc) in list_cone_actors(world)
+                if int(aid) in kept_ids
+            ]
+            for cam in cfg["sensors"]["cameras"]:
+                cam_name = cam["name"]
+                cam_actor = rig.sensors[cam_name]
+                cones_2d = project_cones_for_camera(
+                    cones_world,
+                    cam_actor.get_transform(),
+                    np.array(rig.cam_intrinsics[cam_name], dtype=np.float64),
+                    cam["width"],
+                    cam["height"],
+                )
+                with open(scene_dir / "labels_2d"
+                          / f"{stem}_cam_{cam_name}.json", "w") as f:
+                    json.dump({"frame": idx, "camera": cam_name,
+                               "cones_in_image": cones_2d}, f)
 
             # Ego world pose for optional temporal use later
             etf = vehicle.get_transform()
