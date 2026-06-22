@@ -224,7 +224,9 @@ def spawn_track(cones, bp_left_id, bp_right_id, ground_z):
 
 
 def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
-                             track_width=None):
+                             track_width=None, zone=None,
+                             lobes_range=None, amp_fill_range=None,
+                             draw_debug_arena=True):
     
     sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
 
@@ -234,8 +236,10 @@ def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
     bp_left_id = sp_cfg["cone_blueprint_left"]
     bp_right_id = sp_cfg["cone_blueprint_right"]
 
-    # Pick which arena to use from "zone"
-    zone = sp_cfg.get("zone", DEFAULT_ZONE)
+    # Pick which arena to use. Explicit zone arg (from the dataset builder)
+    # overrides the YAML; falls back to config, then default.
+    if zone is None:
+        zone = sp_cfg.get("zone", DEFAULT_ZONE)
     if zone not in ARENA_ZONES:
         raise RuntimeError(
             f"[track_spawner] Unknown zone {zone}. Valid zones: "
@@ -249,6 +253,11 @@ def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
         missing_cone_ratio = sp_cfg["missing_cone_ratio"]
     if track_width is None:
         track_width = sp_cfg["track_width"]
+    # Per-call geometry overrides (dataset builder randomises these per scene).
+    if lobes_range is None:
+        lobes_range = (sp_cfg["lobes_min"], sp_cfg["lobes_max"])
+    if amp_fill_range is None:
+        amp_fill_range = (sp_cfg["amp_fill_min"], sp_cfg["amp_fill_max"])
 
     from procedural_track_gen import generate_serpentine_in_polygon
 
@@ -258,8 +267,8 @@ def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
         cone_spacing=4.0,
         edge_margin=sp_cfg["edge_margin"],
         seed=seed,
-        lobes_range=(sp_cfg["lobes_min"], sp_cfg["lobes_max"]),
-        amp_fill_range=(sp_cfg["amp_fill_min"], sp_cfg["amp_fill_max"]),
+        lobes_range=lobes_range,
+        amp_fill_range=amp_fill_range,
         length_fill=sp_cfg["length_fill"],
         missing_cone_ratio=missing_cone_ratio,
     )
@@ -272,7 +281,10 @@ def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
     if spawning_enabled:
         client = carla.Client("localhost", 2000)
         world = client.get_world()
-        draw_arena(world, arena_corners)
+        # Debug arena outline pollutes dataset camera frames, so the recorder
+        # passes draw_debug_arena=False. The live pipeline keeps it on.
+        if draw_debug_arena:
+            draw_arena(world, arena_corners)
         cone_actors = spawn_track(cones, bp_left_id, bp_right_id, ground_z)
         print("Track spawned!")
     else:

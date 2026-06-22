@@ -11,12 +11,11 @@ import carla
 import yaml
 
 from sensor_capture import SyncSensorRig
-from gt_extraction import extract_frame_annotations, list_cone_actors
+from gt_extraction import extract_frame_annotations
 from coordinate_frames import FRAME_CONVENTION
-from projection_2d import project_cones_for_camera
 
 from track_spawner import generate_and_spawn_track
-from centerline_pipeline import compute_centerline_carla, draw_debug
+from centerline_pipeline import compute_centerline_carla
 from pursuit_controller import PurePursuitController
 
 
@@ -62,35 +61,65 @@ def scene_is_complete(scene_dir):
         return False
 
 
-def _write_calib(scene_dir, rig, condition):
+def _write_calib(scene_dir, rig, condition, scene_meta=None):
     calib = rig.calib_dict()
     calib["frame_convention"] = FRAME_CONVENTION
     with open(Path(scene_dir) / "calib.yaml", "w") as f:
         yaml.safe_dump(calib, f, sort_keys=False)
+    # condition.yaml gets the weather/noise AND the per-scene zone/geometry, so
+    # every scene on disk is self-describing (traceability for ablations).
+    out = dict(condition)
+    if scene_meta:
+        out["scene_info"] = {
+            "zone": scene_meta.get("zone"),
+            "track_seed": scene_meta.get("track_seed"),
+            "lobes_min": scene_meta.get("lobes_min"),
+            "lobes_max": scene_meta.get("lobes_max"),
+        }
     with open(Path(scene_dir) / "condition.yaml", "w") as f:
-        yaml.safe_dump(condition, f, sort_keys=False)
+        yaml.safe_dump(out, f, sort_keys=False)
 
 
-def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
+def _dump_labels_readable(scene_path, frame_idx, cones):
+    
+    lines = ["{", f'  "frame": {frame_idx},', '  "cones": [']
+    for i, c in enumerate(cones):
+        comma = "," if i < len(cones) - 1 else ""
+        lines.append("    " + json.dumps(c, separators=(", ", ": ")) + comma)
+    lines.append("  ]")
+    lines.append("}")
+    Path(scene_path).write_text("\n".join(lines))
+
+
+def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
+                 scene_meta=None):
+    scene_meta = scene_meta or {}
 
     scene_dir = Path(scene_dir)
     (scene_dir / "lidar").mkdir(parents=True, exist_ok=True)
     (scene_dir / "images").mkdir(parents=True, exist_ok=True)
     (scene_dir / "labels").mkdir(parents=True, exist_ok=True)
-    #new outputs added for the camera branch: GT depth + projected 2D cones.
-    (scene_dir / "depth").mkdir(parents=True, exist_ok=True)
-    (scene_dir / "labels_2d").mkdir(parents=True, exist_ok=True)
 
     logger.info(f"[{scene_id}] applying condition '{condition['name']}'")
     apply_condition(world, condition)
 
     # Ground height for this run's arena zone (same logic as spawn_vehicles.py).
-    zone = cfg.get("track_spawner", {}).get("zone", 1)
+    # Zone is decided per-scene by the dataset builder (manifest), falling back
+    # to config then default.
+    zone = scene_meta.get("zone", cfg.get("track_spawner", {}).get("zone", 1))
     ground_z = GROUND_Z_BY_ZONE.get(zone, 237.0)
 
     #  Track + cones (cleaning previous cones incorporated)
-    logger.info(f"[{scene_id}] generating + spawning track")
-    cones, start_x, start_y, scale, cone_actors = generate_and_spawn_track()
+    logger.info(f"[{scene_id}] generating + spawning track (zone={zone})")
+    lobes_range = None
+    if "lobes_min" in scene_meta and "lobes_max" in scene_meta:
+        lobes_range = (scene_meta["lobes_min"], scene_meta["lobes_max"])
+    cones, start_x, start_y, scale, cone_actors = generate_and_spawn_track(
+        seed=scene_meta.get("track_seed"),
+        zone=zone,
+        lobes_range=lobes_range,
+        draw_debug_arena=False,   # debug outline would pollute camera frames
+    )
 
     repo_root = Path(__file__).resolve().parents[2]
     waypoints = compute_centerline_carla(
@@ -103,9 +132,9 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
         z=ground_z,                # centerline at the zone's ground height
     )
 
-    # Draw the centerline so the server view shows where the car should drive.
-    # Lifetime spans the whole scene so it stays visible during recording.
-    draw_debug(world, waypoints, life_time=120.0)
+    # NOTE: the centerline debug line is intentionally NOT drawn here. CARLA's
+    # debug.draw_* primitives render into the world and get baked into the RGB
+    # camera frames, contaminating the dataset images. Keep recording clean.
 
     # Spawn ego at first waypoint, facing the path, at ground height.
     bp = world.get_blueprint_library().find(cfg["ego"]["blueprint"])
@@ -130,7 +159,7 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
     rig = SyncSensorRig(world, vehicle, scene_sensors_cfg)
 
     # Calibration is per-scene, written up front.
-    _write_calib(scene_dir, rig, condition)
+    _write_calib(scene_dir, rig, condition, scene_meta)
 
     ego_pose_rows = []
     frames_written = 0
@@ -180,37 +209,8 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
                 cone_cfg=cfg.get("cones", {}),
                 lidar_points_rh=data["lidar"]["points_rh"],
             )
-            with open(scene_dir / "labels" / f"{stem}.json", "w") as f:
-                json.dump({"frame": idx, "cones": ann}, f)
-
-            #GT depth from carla aligned with the left RGB camera
-            if "depth" in data:
-                np.save(scene_dir / "depth" / f"{stem}.npy", data["depth"]["depth_m"])
-
-            #GT 2d: project cones into each camera image
-            #coherence with the 3D GT: keep only cones that passed the grid extent filter above
-            #the 3D annotations carry their instance_id so we reuse that set to filter the world frame cone list
-            kept_ids = {a["instance_id"] for a in ann}
-            cones_world = [
-                {"instance_id": int(aid), "class": label,
-                 "world_xyz": [loc.x, loc.y, loc.z]}
-                for (aid, label, loc) in list_cone_actors(world)
-                if int(aid) in kept_ids
-            ]
-            for cam in cfg["sensors"]["cameras"]:
-                cam_name = cam["name"]
-                cam_actor = rig.sensors[cam_name]
-                cones_2d = project_cones_for_camera(
-                    cones_world,
-                    cam_actor.get_transform(),
-                    np.array(rig.cam_intrinsics[cam_name], dtype=np.float64),
-                    cam["width"],
-                    cam["height"],
-                )
-                with open(scene_dir / "labels_2d"
-                          / f"{stem}_cam_{cam_name}.json", "w") as f:
-                    json.dump({"frame": idx, "camera": cam_name,
-                               "cones_in_image": cones_2d}, f)
+            _dump_labels_readable(
+                scene_dir / "labels" / f"{stem}.json", idx, ann)
 
             # Ego world pose for optional temporal use later
             etf = vehicle.get_transform()
@@ -245,6 +245,10 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger):
     marker = {
         "scene_id": scene_id,
         "condition": condition["name"],
+        "zone": zone,
+        "track_seed": scene_meta.get("track_seed"),
+        "lobes_min": scene_meta.get("lobes_min"),
+        "lobes_max": scene_meta.get("lobes_max"),
         "frames_written": frames_written,
         "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }

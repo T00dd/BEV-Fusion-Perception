@@ -33,17 +33,36 @@ def setup_logging(out_dir):
 
 
 def build_manifest(cfg):
-    
+
     # cycle conditions across scenes then shuffle to assign splits
     # ensure that each split has a good mix of conditions, rather than all of one condition in train, etc.
     conditions = cfg["conditions"]
     n_scenes = cfg["scenes"]["count"]
+
+    # Per-scene randomisation (zone + track geometry), seeded for reproducibility.
+    # Everything that varies per scene is frozen HERE in the manifest, so a run
+    # is fully determined by split_seed and can be resumed/reproduced exactly.
+    scn = cfg["scenes"]
+    geo_seed = scn.get("geometry_seed", scn.get("split_seed", 0))
+    grng = random.Random(geo_seed)
+
+    zones = scn.get("zones", [1, 2])              # alternate across these
+    lobes_min = scn.get("lobes_min", 2)           # keep a low floor of curves
+    lobes_max_lo = scn.get("lobes_max_min", 4)    # randomise the CEILING in
+    lobes_max_hi = scn.get("lobes_max_max", 7)    # [lobes_max_lo, lobes_max_hi]
+
     scenes = []
     for i in range(n_scenes):
         cond = conditions[i % len(conditions)]
+        zone = grng.choice(zones)
+        lobes_max = grng.randint(lobes_max_lo, lobes_max_hi)
         scenes.append({
             "scene_id": f"scene_{i:04d}",
             "condition": cond["name"],
+            "zone": zone,
+            "track_seed": grng.randint(0, 2**31 - 1),  # distinct track per scene
+            "lobes_min": lobes_min,
+            "lobes_max": lobes_max,
         })
 
     rng = random.Random(cfg["scenes"].get("split_seed", 0))
@@ -165,8 +184,13 @@ def main():
                 continue
 
             cond = condition_by_name(cfg, s["condition"])
+            logger.info(f"[{scene_id}] zone={s.get('zone')} "
+                        f"lobes=[{s.get('lobes_min')},{s.get('lobes_max')}] "
+                        f"track_seed={s.get('track_seed')} "
+                        f"condition={s['condition']} split={s.get('split')}")
             try:
-                record_scene(client, world, scene_id, scene_dir, cond, cfg, logger)
+                record_scene(client, world, scene_id, scene_dir, cond, cfg,
+                             logger, scene_meta=s)
                 total_done += 1
             except KeyboardInterrupt:
                 logger.warning("Interrupted by user; current scene left incomplete "
