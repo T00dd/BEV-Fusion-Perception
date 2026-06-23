@@ -244,7 +244,7 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
                 with open(scene_dir / "labels_2d"
                           / f"{stem}_cam_{cam_name}.json", "w") as f:
                     json.dump({"frame": idx, "camera": cam_name,
-                               "cones_in_image": cones_2d}, f)
+                               "cones_in_image": cones_2d}, f, indent=2)
 
             # Ego world pose for optional temporal use later
             etf = vehicle.get_transform()
