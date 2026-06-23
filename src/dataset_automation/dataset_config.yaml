@@ -27,18 +27,22 @@ cones:
     orange_big:   [0.28, 0.28, 0.50]
 
 scenes:
-  count: 3
+  count: 45
   split_ratios: {train: 0.7, val: 0.15, test: 0.15}
   split_seed: 0
   geometry_seed: 0               # seeds per-scene zone + track randomisation
   # Per-scene variety (frozen into the manifest for reproducibility):
-  zones: [1, 2]                  # scenes alternate randomly across these
+  zones: [1, 2]           
+scenes:
+  count: 45
+  split_ratios: {train: 0.7, val: 0.15, test: 0.15}
+  split_seed: 0       # scenes alternate randomly across these
   lobes_min: 2                   # constant floor of curves (>=2-3 recommended)
   lobes_max_min: 4               # per-scene curve ceiling drawn in
   lobes_max_max: 7               # [lobes_max_min, lobes_max_max]
 
 capture:
-  max_frames_per_scene: 25
+  max_frames_per_scene: 30
   warmup_ticks: 10
   capture_every_n_ticks: 50
 
@@ -65,14 +69,14 @@ sensors:
   cameras:
     - name: "left"
       width: 640
-      height: 480
+      height: 640
       fov: 90
-      mount: {x: 1.2, y: -0.15, z: 1.4, yaw: 0.0}
+      mount: {x: 1.6, y: -0.50, z: 1.4, yaw: 15.0}
     - name: "right"
       width: 640
-      height: 480
+      height: 640
       fov: 90
-      mount: {x: 1.2, y: 0.15, z: 1.4, yaw: 0.0}
+      mount: {x: 1.6, y: 0.50, z: 1.4, yaw: -15.0}
 
 conditions:
   - name: "noon_clear"
