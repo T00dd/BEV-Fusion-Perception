@@ -97,6 +97,17 @@ def load_or_create_manifest(cfg, out_dir, logger):
     return manifest
 
 
+def frames_in_scene(scene_dir):
+    # Read frames_written from a completed scene's _COMPLETE marker (0 if absent).
+    marker = Path(scene_dir) / "_COMPLETE"
+    if not marker.exists():
+        return 0
+    try:
+        return int(json.loads(marker.read_text()).get("frames_written", 0))
+    except Exception:
+        return 0
+
+
 def condition_by_name(cfg, name):
     for c in cfg["conditions"]:
         if c["name"] == name:
@@ -173,14 +184,19 @@ def main():
     client, world, original_settings = connect(cfg, logger)
 
     total_done = 0
+    total_frames = 0
+    n_scenes = len(manifest)
     try:
         for s in manifest:
             scene_id = s["scene_id"]
             scene_dir = out_dir / "scenes" / scene_id
 
             if scene_is_complete(scene_dir):
-                logger.info(f"[{scene_id}] already complete -> skip (resume)")
+                f = frames_in_scene(scene_dir)
+                total_frames += f
                 total_done += 1
+                logger.info(f"[{scene_id}] already complete ({f} frames) -> "
+                            f"skip (resume)")
                 continue
 
             cond = condition_by_name(cfg, s["condition"])
@@ -189,8 +205,9 @@ def main():
                         f"track_seed={s.get('track_seed')} "
                         f"condition={s['condition']} split={s.get('split')}")
             try:
-                record_scene(client, world, scene_id, scene_dir, cond, cfg,
-                             logger, scene_meta=s)
+                f = record_scene(client, world, scene_id, scene_dir, cond, cfg,
+                                 logger, scene_meta=s)
+                total_frames += int(f or 0)
                 total_done += 1
             except KeyboardInterrupt:
                 logger.warning("Interrupted by user; current scene left incomplete "
@@ -201,14 +218,22 @@ def main():
                 # No _COMPLETE marker -> it will be retried on next run.
                 continue
 
+            # Global progress: frames so far + a projection from the running
+            # average frames-per-scene (refines as more scenes complete).
+            avg = total_frames / max(total_done, 1)
+            projected = int(round(avg * n_scenes))
+            logger.info(f"PROGRESS: {total_frames} frames across "
+                        f"{total_done}/{n_scenes} scenes "
+                        f"(~{projected} projected at {avg:.0f} frames/scene)")
+
             # Refresh splits as we go so partial datasets are usable.
             write_splits(out_dir, manifest)
 
     finally:
         world.apply_settings(original_settings)
         counts = write_splits(out_dir, manifest)
-        logger.info(f"Run finished. Completed {total_done}/{len(manifest)} scenes. "
-                    f"Split counts: {counts}")
+        logger.info(f"Run finished. Completed {total_done}/{n_scenes} scenes, "
+                    f"{total_frames} frames total. Split counts: {counts}")
 
 
 if __name__ == "__main__":
