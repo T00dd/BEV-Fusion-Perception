@@ -228,7 +228,7 @@ def generate_and_spawn_track(seed=None, missing_cone_ratio=None,
                              lobes_range=None, amp_fill_range=None,
                              draw_debug_arena=True):
     
-    sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
+    #sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8")
 
     sp_cfg = load_spawner_config()
     ground_z = sp_cfg["ground_z"]
