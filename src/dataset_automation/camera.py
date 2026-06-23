@@ -13,6 +13,12 @@ class cameraMono:
         camera_bp.set_attribute('sensor_tick', str(0.05))  # set to 20 FPS
         camera_bp.set_attribute('image_size_x', '640')
         camera_bp.set_attribute('image_size_y', '480')
+
+        camera_bp.set_attribute("motion_blur_intensity", "0.0")
+        camera_bp.set_attribute("motion_blur_max_distortion", "0.0")
+        camera_bp.set_attribute("blur_amount", "0.0")
+        camera_bp.set_attribute("lens_flare_intensity", "0.0")
+
         relative_transform = carla.Transform(carla.Location(x=0.4, z=1.4))
         self.camera = world.spawn_actor(camera_bp, relative_transform, attach_to=vehicle, attachment_type=carla.AttachmentType.Rigid)
         print("camera attached")
@@ -46,6 +52,12 @@ class cameraRgbd:
         rgb_camera_bp.set_attribute('image_size_y', '480')
         depth_camera_bp.set_attribute('image_size_x', '640')
         depth_camera_bp.set_attribute('image_size_y', '480')
+
+        rgb_camera_bp.set_attribute("motion_blur_intensity", "0.0")
+        rgb_camera_bp.set_attribute("motion_blur_max_distortion", "0.0")
+        rgb_camera_bp.set_attribute("blur_amount", "0.0")
+        rgb_camera_bp.set_attribute("lens_flare_intensity", "0.0")
+
         relative_transform = carla.Transform(carla.Location(x=0.4, z=1.4))
         self.rgb_camera = world.spawn_actor(rgb_camera_bp, relative_transform, attach_to=vehicle, attachment_type=carla.AttachmentType.Rigid)
         self.depth_camera = world.spawn_actor(depth_camera_bp, relative_transform, attach_to=vehicle, attachment_type=carla.AttachmentType.Rigid)
@@ -122,6 +134,17 @@ class cameraStereo:
         left_rgb_camera.set_attribute('image_size_y', '480')
         right_rgb_camera.set_attribute('image_size_x', '640')
         right_rgb_camera.set_attribute('image_size_y', '480')
+
+        def __init__(self, world, vehicle, zmq_socket, socket_lock=None):
+            right_rgb_camera.set_attribute('image_size_x', '640')
+            right_rgb_camera.set_attribute('image_size_y', '480')
+            
+            for bp in [left_rgb_camera, right_rgb_camera]:
+                bp.set_attribute("motion_blur_intensity", "0.0")
+                bp.set_attribute("motion_blur_max_distortion", "0.0")
+                bp.set_attribute("blur_amount", "0.0")
+                bp.set_attribute("lens_flare_intensity", "0.0")
+    
         relative_transform_left = carla.Transform(carla.Location(x=0.4, y=-0.2, z=1.4))
         relative_transform_right = carla.Transform(carla.Location(x=0.4, y=0.2, z=1.4))
         self.left_camera = world.spawn_actor(left_rgb_camera, relative_transform_left, attach_to=vehicle, attachment_type=carla.AttachmentType.Rigid)

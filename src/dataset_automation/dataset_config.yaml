@@ -56,9 +56,9 @@ sensors:
     # solid-state emulation: high density + narrow vertical band + front crop
     channels: 128
     range: 120
-    points_per_second: 1500000
-    upper_fov: 10.0
-    lower_fov: -20.0
+    points_per_second: 10400000
+    upper_fov: 30
+    lower_fov: -10
     rotation_frequency: 20
     noise_stddev: 0.0
     dropoff_general_rate: 0.0
@@ -70,13 +70,15 @@ sensors:
     - name: "left"
       width: 640
       height: 640
-      fov: 90
-      mount: {x: 1.6, y: -0.50, z: 1.4, yaw: 15.0}
+      fov: 80
+      mount: {x: 1.6, y: -0.50, z: 1.4, yaw: 0.0}
+      exposure: {mode: manual, shutter_speed: 150.0, iso: 225.0, fstop: 8.0, gamma: 2.2, focal_distance: 100000, enable_postprocess_effects: true}
     - name: "right"
       width: 640
       height: 640
-      fov: 90
-      mount: {x: 1.6, y: 0.50, z: 1.4, yaw: -15.0}
+      fov: 80
+      mount: {x: 1.6, y: 0.50, z: 1.4, yaw: 0.0}
+      exposure: {mode: manual, shutter_speed: 150.0, iso: 225.0, fstop: 8.0, gamma: 2.2, focal_distance: 100000, enable_postprocess_effects: true}
 
 conditions:
   - name: "noon_clear"

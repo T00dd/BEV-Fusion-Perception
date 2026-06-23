@@ -16,6 +16,7 @@ class SyncSensorRig:
         self.queues = {}           # name -> queue.Queue
         self.cam_intrinsics = {}   # name -> 3x3 K
         self.cam_extrinsics = {}   # name -> 4x4 (cam<-ego) at spawn
+        self.cam_exposure = {}     # name -> applied photometric attrs
         self.lidar_mount = None    # carla.Transform relative to ego
         self.front_crop_halfdeg = None  # set by _spawn_lidar from config
 
@@ -23,10 +24,6 @@ class SyncSensorRig:
         self._spawn_lidar(bp_lib)
         for cam in cfg["cameras"]:
             self._spawn_camera(bp_lib, cam)
-
-        #depth camera (gt depth from carla) mounted with the SAME transform as the left camera so the depth map is pixel aligned with the left RGB
-        self.depth_cam_name = None
-        self._spawn_depth_camera(bp_lib)
 
     # spawn sensors in synchronous mode, with queues to hold the latest frame for each sensor
     def _spawn_lidar(self, bp_lib):
@@ -39,16 +36,10 @@ class SyncSensorRig:
         bp.set_attribute("lower_fov", str(lc["lower_fov"]))
         bp.set_attribute("rotation_frequency", str(lc["rotation_frequency"]))
 
-        # Measurement noise (Type A: per-ray range jitter) 
-        # Applied at the sensor: the std-dev (metres) of gaussian noise along
-        # each ray. Driven per-scene from the condition (see scene_recorder).
         noise = float(lc.get("noise_stddev", 0.0))
         if noise > 0.0:
             bp.set_attribute("noise_stddev", str(noise))
 
-        # Point dropout (Type B: lost returns) 
-        # When we want a CLEAN cloud (noise==0 and dropout explicitly off) we
-        # zero out CARLA's stochastic dropoff so cones keep every point.
         dropoff = float(lc.get("dropoff_general_rate", 0.0))
         if noise <= 0.0 and dropoff <= 0.0:
             bp.set_attribute("dropoff_general_rate", "0.0")
@@ -57,9 +48,6 @@ class SyncSensorRig:
         else:
             bp.set_attribute("dropoff_general_rate", str(dropoff))
 
-        # --- Front-sector crop (emulate a forward-facing solid-state) -------
-        # CARLA's ray_cast always spins 360 deg. We optionally keep only the
-        # front azimuthal sector in post (grab()). Store the half-angle here.
         fc = lc.get("front_crop", None)
         if fc and fc.get("enabled", False):
             self.front_crop_halfdeg = float(fc.get("half_angle_deg", 60.0))
@@ -81,6 +69,31 @@ class SyncSensorRig:
         bp.set_attribute("image_size_x", str(cam["width"]))
         bp.set_attribute("image_size_y", str(cam["height"]))
         bp.set_attribute("fov", str(cam["fov"]))
+
+        bp.set_attribute("motion_blur_intensity", "0.0")
+        bp.set_attribute("motion_blur_max_distortion", "0.0")
+        bp.set_attribute("blur_amount", "0.0")
+
+        exp = cam.get("exposure", {}) or {}
+        applied = {}
+        _photo_map = [
+            ("mode", "exposure_mode"),
+            ("compensation", "exposure_compensation"),
+            ("shutter_speed", "shutter_speed"),
+            ("iso", "iso"),
+            ("fstop", "fstop"),
+            ("gamma", "gamma"),
+            # Depth-of-field / lens controls:
+            ("focal_distance", "focal_distance"),
+            ("min_fstop", "min_fstop"),
+            ("blade_count", "blade_count"),
+            ("enable_postprocess_effects", "enable_postprocess_effects"),
+        ]
+        for cfg_key, attr in _photo_map:
+            if cfg_key in exp and bp.has_attribute(attr):
+                bp.set_attribute(attr, str(exp[cfg_key]))
+                applied[attr] = exp[cfg_key]
+        self.cam_exposure[cam["name"]] = applied
 
         mount = carla.Transform(
             carla.Location(x=cam["mount"]["x"], y=cam["mount"]["y"], z=cam["mount"]["z"]),
@@ -105,48 +118,6 @@ class SyncSensorRig:
         self.cam_intrinsics[name] = K
         # Extrinsic: camera mount relative to ego (left-handed CARLA frame)
         self.cam_extrinsics[name] = np.array(mount.get_matrix(), dtype=np.float64)
-
-    def _spawn_depth_camera(self, bp_lib):
-        #find the left camera config to mirror its mount + resolution + fov so the depth map aligns 1:1 with the left RGB image
-        cams = self.cfg["cameras"]
-        left_cfg = next((c for c in cams if c["name"] == "left"), cams[0])
-
-        bp = bp_lib.find("sensor.camera.depth")
-        bp.set_attribute("image_size_x", str(left_cfg["width"]))
-        bp.set_attribute("image_size_y", str(left_cfg["height"]))
-        bp.set_attribute("fov", str(left_cfg["fov"]))
-
-        mount = carla.Transform(
-            carla.Location(x=left_cfg["mount"]["x"],
-                           y=left_cfg["mount"]["y"],
-                           z=left_cfg["mount"]["z"]),
-            carla.Rotation(yaw=left_cfg["mount"].get("yaw", 0.0),
-                           pitch=left_cfg["mount"].get("pitch", 0.0),
-                           roll=left_cfg["mount"].get("roll", 0.0)),
-        )
-        sensor = self.world.spawn_actor(bp, mount, attach_to=self.vehicle,
-                                        attachment_type=carla.AttachmentType.Rigid)
-        q = queue.Queue()
-        sensor.listen(q.put)
-        name = "depth_" + left_cfg["name"]
-        self.sensors[name] = sensor
-        self.queues[name] = q
-        self.depth_cam_name = name
-
-    @staticmethod
-    def _decode_depth_carla(depth_image):
-        #decode CARLA's depth encoding (BGRA, depth packed in RGB channels)
-        #into a float32 metric depth map (metres). Same formula used in the
-        #project's camera.py (cameraRgbd), kept identical for consistency
-        arr = np.frombuffer(depth_image.raw_data, dtype=np.uint8).reshape(
-            depth_image.height, depth_image.width, 4)
-        B = arr[:, :, 0].astype(np.float32)
-        G = arr[:, :, 1].astype(np.float32)
-        R = arr[:, :, 2].astype(np.float32)
-        # normalized in [0,1]; carla's far plane is 1000 m
-        normalized = (R + G * 256.0 + B * 256.0 * 256.0) / (256.0 ** 3 - 1.0)
-        depth_m = 1000.0 * normalized  # metres
-        return depth_m.astype(np.float32)
 
     def _drain_to_frame(self, q, frame_id, timeout=2.0):
         # Drain the queue until we find the frame_id we want, or a later frame
@@ -186,14 +157,6 @@ class SyncSensorRig:
             arr = np.frombuffer(img.raw_data, dtype=np.uint8).reshape(
                 img.height, img.width, 4)
             out["cameras"][name] = {"image": arr[:, :, :3].copy()}  # BGRA->BGR
-
-        #depth (GT, aligned with the left RGB camera)
-        if self.depth_cam_name is not None:
-            depth_raw = self._drain_to_frame(self.queues[self.depth_cam_name], frame_id)
-            out["depth"] = {
-                "depth_m": self._decode_depth_carla(depth_raw),
-                "aligned_with": self.depth_cam_name.replace("depth_", ""),
-            }
         return out
 
     def calib_dict(self):
@@ -210,6 +173,7 @@ class SyncSensorRig:
                 "width": cam["width"],
                 "height": cam["height"],
                 "fov": cam["fov"],
+                "exposure": self.cam_exposure.get(name, {}),
             }
         return calib
 
