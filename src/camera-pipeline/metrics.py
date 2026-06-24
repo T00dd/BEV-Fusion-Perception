@@ -206,8 +206,8 @@ class ValidationAccumulator:
             )
 
             sample_id = sample_ids[b]
-            
-            cones_path = self.dataset_root / "sequences" / sample_id / "cones_camera_2d.json"
+            scene_id, frame_stem = sample_id.split("/")
+            cones_path = self.dataset_root / "scenes" / scene_id / "labels_2d" / f"{frame_stem}_cam_left.json"
             with open(cones_path, "r") as f:
                 cones_data = json.load(f)
 
