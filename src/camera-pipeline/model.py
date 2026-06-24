@@ -62,7 +62,7 @@ class HRNet_with_detection_head(nn.Module):
         feature_index: int = 1,
         num_classes: int = 2,
         head_hidden_channels: int = 64,
-        head_numlayers: int = 3,
+        head_num_layers: int = 3,
         pretrained: bool = True,
     ):
         super().__init__()
@@ -87,7 +87,7 @@ class HRNet_with_detection_head(nn.Module):
             in_channels=feature_channels,
             hidden_channels=head_hidden_channels,
             num_classes=num_classes,
-            numlayers=head_numlayers,
+            numlayers=head_num_layers,
         )
 
     

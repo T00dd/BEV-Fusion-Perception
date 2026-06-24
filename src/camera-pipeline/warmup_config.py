@@ -6,7 +6,7 @@ from typing import Tuple
 @dataclass
 class WarmupConfig:
     #path
-    dataset_root: Path = Path("/path/to/fsae_dataset")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
+    dataset_root: Path = Path("../../../dataset_carla_testing_small_zone1_nocurves")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
     output_dir: Path = Path("./checkpoints/warmup")
     models_dir: Path = Path("../models")
     
