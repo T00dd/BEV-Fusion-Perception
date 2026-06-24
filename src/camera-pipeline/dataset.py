@@ -47,8 +47,8 @@ def generate_heatmap_offset_mask(
     offset_mask = np.zeros((H_feat, W_feat), dtype=np.float32)
 
     color_to_class = {
-        "red": 0,
-        "blue": 1,
+        "blue": 0,
+        "yellow": 1,
     }
 
     for cone in cones:
@@ -85,6 +85,7 @@ def generate_heatmap_offset_mask(
         offset[1, cy_feat_int, cx_feat_int] = cy_feat - cy_feat_int
         offset_mask[cy_feat_int, cx_feat_int] = 1.0
 
+    return heatmap, offset, offset_mask
 
 class WarmupDataset(Dataset):
 
@@ -115,7 +116,17 @@ class WarmupDataset(Dataset):
 
         #cerca lista dei sample dallo split file
         split_path = self.dataset_root / split_file
-        with open(split_path, "r") as f: self.sample_ids = [line.strip() for line in f if line.strip()]
+        with open(split_path, "r") as f: scene_ids = [line.strip() for line in f if line.strip()]
+
+        #lo split file contiene scene (es. scene_0001), le espandiamo nei loro frame
+        self.sample_ids = []
+        for scene_id in scene_ids:
+            img_dir = self.dataset_root / "scenes" / scene_id / "images"
+            if not img_dir.is_dir():
+                continue
+            for img_path in sorted(img_dir.glob("*_cam_left.png")):
+                frame_stem = img_path.name.replace("_cam_left.png", "")
+                self.sample_ids.append((scene_id, frame_stem))
 
         self.image_transform = transforms.Compose([
             transforms.ToTensor(),
@@ -131,16 +142,17 @@ class WarmupDataset(Dataset):
     def __len__(self) -> int:
         return len(self.sample_ids)
 
-    def _sample_path(self, sample_id: str) -> Path:
+    def _sample_path(self, scene_id: str) -> Path:
         #ritorna il path della cartella del sample dato l'id del sample
-        return self.dataset_root / "sequences" / sample_id
+        return self.dataset_root / "scenes" / scene_id
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         sample_id = self.sample_ids[idx]
-        sample_dir = self._sample_path(sample_id)
+        scene_id, frame_stem = sample_id
+        sample_dir = self._sample_path(scene_id)
 
         #carica immagine
-        img_path = sample_dir / "camera_left.png"
+        img_path = sample_dir / "images" / f"{frame_stem}_cam_left.png"
         image = Image.open(img_path).convert("RGB") 
 
 
@@ -169,7 +181,7 @@ class WarmupDataset(Dataset):
             heatmap_path = sample_dir / "heatmap_2d.npy" #implementare script in futuro
             heatmap = np.load(heatmap_path).astype(np.float32)
             #per offset/mask abbiamo bisogno dei coni: leggiamo comunque il json
-            cones_path = sample_dir / "cones_camera_2d.json"
+            cones_path = sample_dir / "labels_2d" / f"{frame_stem}_cam_left.json"
             with open(cones_path, "r") as f:
                 cones_data = json.load(f)
             _, offset, offset_mask = generate_heatmap_offset_mask(
@@ -181,7 +193,7 @@ class WarmupDataset(Dataset):
             )
         else:
             #genera tutto dal JSON
-            cones_path = sample_dir / "cones_camera_2d.json"
+            cones_path = sample_dir / "labels_2d" / f"{frame_stem}_cam_left.json"
             with open(cones_path, "r") as f:
                 cones_data = json.load(f)
             heatmap, offset, offset_mask = generate_heatmap_offset_mask(
@@ -198,8 +210,5 @@ class WarmupDataset(Dataset):
             "heatmap": torch.from_numpy(heatmap),
             "offset": torch.from_numpy(offset),
             "offset_mask": torch.from_numpy(offset_mask),
-            "sample_id": sample_id,
+            "sample_id": f"{scene_id}/{frame_stem}",
         }
-    
-
-
