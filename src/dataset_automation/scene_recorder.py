@@ -11,17 +11,29 @@ import carla
 import yaml
 
 from sensor_capture import SyncSensorRig
-from gt_extraction import extract_frame_annotations, list_cone_actors
+from gt_extraction import extract_frame_annotations
 from coordinate_frames import FRAME_CONVENTION
-from projection_2d import project_cones_for_camera
 
 from track_spawner import generate_and_spawn_track
 from centerline_pipeline import compute_centerline_carla
 from pursuit_controller import PurePursuitController
+from scene_lights import SceneLights
 
 
-COMPLETE_MARKER = "_COMPLETE"
+def condition_is_night(condition):
+    # Night if the sun is at/below the horizon. Works for both hand-written
+    # conditions (sun_altitude_angle in weather) and CARLA presets named *Night.
+    name = str(condition.get("name", "")).lower()
+    if "night" in name:
+        return True
+    sun = condition.get("weather", {}).get("sun_altitude_angle", 90)
+    try:
+        return float(sun) <= 0.0
+    except (TypeError, ValueError):
+        return False
 
+
+COMPLETE_MARKER = "_COMPLETE" 
 GROUND_Z_BY_ZONE = {1: 237.0, 2: 237.0}
 
 
@@ -82,7 +94,7 @@ def _write_calib(scene_dir, rig, condition, scene_meta=None):
 
 
 def _dump_labels_readable(scene_path, frame_idx, cones):
-    
+
     lines = ["{", f'  "frame": {frame_idx},', '  "cones": [']
     for i, c in enumerate(cones):
         comma = "," if i < len(cones) - 1 else ""
@@ -100,12 +112,16 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
     (scene_dir / "lidar").mkdir(parents=True, exist_ok=True)
     (scene_dir / "images").mkdir(parents=True, exist_ok=True)
     (scene_dir / "labels").mkdir(parents=True, exist_ok=True)
-    #new outputs (added for the camera branch): GT depth + projected 2D cones
-    (scene_dir / "depth").mkdir(parents=True, exist_ok=True)
-    (scene_dir / "labels_2d").mkdir(parents=True, exist_ok=True)
 
     logger.info(f"[{scene_id}] applying condition '{condition['name']}'")
     apply_condition(world, condition)
+
+    # Brighten the controllable map light(s) for night presets, restore by day.
+    scene_lights = SceneLights(world)
+    is_night = condition_is_night(condition)
+    scene_lights.set_night(is_night)
+    if is_night:
+        logger.info(f"[{scene_id}] night preset -> map lights brightened")
 
     zone = scene_meta.get("zone", cfg.get("track_spawner", {}).get("zone", 1))
     ground_z = GROUND_Z_BY_ZONE.get(zone, 237.0)
@@ -158,6 +174,14 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
     # Calibration is per-scene, written up front.
     _write_calib(scene_dir, rig, condition, scene_meta)
 
+    # Surface the photometric (exposure/gain) settings actually applied, so the
+    # log shows whether auto-exposure was overridden and with what values.
+    for cam_name, exp in rig.cam_exposure.items():
+        if exp:
+            logger.info(f"[{scene_id}] cam '{cam_name}' exposure: {exp}")
+        else:
+            logger.info(f"[{scene_id}] cam '{cam_name}' exposure: auto (CARLA default)")
+
     ego_pose_rows = []
     frames_written = 0
     max_frames = cfg["capture"]["max_frames_per_scene"]
@@ -209,36 +233,6 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
             _dump_labels_readable(
                 scene_dir / "labels" / f"{stem}.json", idx, ann)
 
-            #gt depth (carla) aligned with the left RGB camera
-            if "depth" in data:
-                np.save(scene_dir / "depth" / f"{stem}.npy",
-                        data["depth"]["depth_m"])
-
-            #gt 2d: project cones into each camera image
-            #coherence with the 3d gt: keep only cones that passed the grid extent filter above
-            #the 3D annotations carry their instance_id so we reuse that set to filter the world-frame cone list
-            kept_ids = {a["instance_id"] for a in ann}
-            cones_world = [
-                {"instance_id": int(aid), "class": label,
-                 "world_xyz": [loc.x, loc.y, loc.z]}
-                for (aid, label, loc) in list_cone_actors(world)
-                if int(aid) in kept_ids
-            ]
-            for cam in cfg["sensors"]["cameras"]:
-                cam_name = cam["name"]
-                cam_actor = rig.sensors[cam_name]
-                cones_2d = project_cones_for_camera(
-                    cones_world,
-                    cam_actor.get_transform(),
-                    np.array(rig.cam_intrinsics[cam_name], dtype=np.float64),
-                    cam["width"],
-                    cam["height"],
-                )
-                with open(scene_dir / "labels_2d"
-                          / f"{stem}_cam_{cam_name}.json", "w") as f:
-                    json.dump({"frame": idx, "camera": cam_name,
-                               "cones_in_image": cones_2d}, f, indent=2)
-
             # Ego world pose for optional temporal use later
             etf = vehicle.get_transform()
             ego_pose_rows.append([
@@ -256,6 +250,7 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
             wtr.writerows(ego_pose_rows)
 
     finally:
+        scene_lights.restore()
         rig.destroy()
         try:
             vehicle.destroy()
