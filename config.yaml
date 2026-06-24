@@ -9,17 +9,17 @@ send position: true
 # Track spawner parameters
 track_spawner:
   enabled: true
-  zone: 2                           
+  zone: 1                           
   ground_z: 237.0                    # z-coordinate of the cone spawn
 
   track_width: 4.5                   
-  missing_cone_ratio: 0.17           
+  missing_cone_ratio: 0.13           
   edge_margin: 1                   # minimum distance of the cones from the polygon edge
   length_fill: 1                   # track extension factor
   amp_fill_min: 0.9                  # minimum usage of width
   amp_fill_max: 0.95                  # max usage of width
-  lobes_min: 8                       # minimum number of S curves
-  lobes_max: 9                       # maximum number of S curves
+  lobes_min: 1                       # minimum number of S curves
+  lobes_max: 1                       # maximum number of S curves
 
   cone_blueprint_left: "static.prop.bluecone"
   cone_blueprint_right: "static.prop.yellowcone"
