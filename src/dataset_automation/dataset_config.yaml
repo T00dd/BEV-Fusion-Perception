@@ -84,39 +84,60 @@ conditions:
   - name: "noon_clear"
     weather: {cloudiness: 5, precipitation: 0, sun_altitude_angle: 75,
               fog_density: 0, wetness: 0}
-    lidar_noise: 0.0
-  - name: "overcast"
-    weather: {cloudiness: 80, precipitation: 0, sun_altitude_angle: 45,
-              fog_density: 0, wetness: 0}
-    lidar_noise: 0.0
-  - name: "light_rain"
-    weather: {cloudiness: 70, precipitation: 40, sun_altitude_angle: 40,
-              fog_density: 10, wetness: 50}
-    lidar_noise: {noise_stddev: 0.015, dropoff_general_rate: 0.10}
-  - name: "heavy_rain"
-    weather: {cloudiness: 90, precipitation: 80, sun_altitude_angle: 35,
-              fog_density: 20, wetness: 80, precipitation_deposits: 60}
-    lidar_noise: {noise_stddev: 0.025, dropoff_general_rate: 0.20}
-  - name: "low_sun"
-    weather: {cloudiness: 10, precipitation: 0, sun_altitude_angle: 8,
-              fog_density: 0, wetness: 0}
-    lidar_noise: 0.01
-  - name: "dusk"
-    weather: {cloudiness: 30, precipitation: 0, sun_altitude_angle: -3,
-              fog_density: 5, wetness: 0}
-    lidar_noise: 0.01
-  - name: "foggy_morning"
-    weather: {cloudiness: 40, precipitation: 0, sun_altitude_angle: 20,
-              fog_density: 60, fog_distance: 10, wetness: 20}
-    lidar_noise: {noise_stddev: 0.02, dropoff_general_rate: 0.15}
+    lidar_noise: 0.005
   - name: "bright_cloudy"
     weather: {cloudiness: 60, precipitation: 0, sun_altitude_angle: 60,
               fog_density: 0, wetness: 0}
-    lidar_noise: 0.0
+    lidar_noise: 0.005
+  - name: "overcast"
+    weather: {cloudiness: 80, precipitation: 0, sun_altitude_angle: 45,
+              fog_density: 0, wetness: 0}
+    lidar_noise: 0.005
+  - name: "morning"
+    weather: {cloudiness: 20, precipitation: 0, sun_altitude_angle: 25,
+              fog_density: 0, wetness: 0}
+    lidar_noise: 0.006
+  - name: "low_sun"
+    weather: {cloudiness: 10, precipitation: 0, sun_altitude_angle: 8,
+              fog_density: 0, wetness: 0}
+    lidar_noise: 0.007
+  - name: "sunset"
+    weather: {cloudiness: 25, precipitation: 0, sun_altitude_angle: 3,
+              fog_density: 5, wetness: 0}
+    lidar_noise: 0.007
   - name: "wet_after_rain"
     weather: {cloudiness: 50, precipitation: 0, sun_altitude_angle: 50,
               fog_density: 0, wetness: 70, precipitation_deposits: 50}
-    lidar_noise: 0.01
+    lidar_noise: 0.008
+  - name: "light_rain"
+    weather: {cloudiness: 70, precipitation: 40, sun_altitude_angle: 40,
+              fog_density: 10, wetness: 50}
+    lidar_noise: {noise_stddev: 0.013, dropoff_general_rate: 0.08}
+  - name: "mid_rain"
+    weather: {cloudiness: 80, precipitation: 60, sun_altitude_angle: 35,
+              fog_density: 15, wetness: 65, precipitation_deposits: 40}
+    lidar_noise: {noise_stddev: 0.018, dropoff_general_rate: 0.13}
+  - name: "heavy_rain"
+    weather: {cloudiness: 90, precipitation: 80, sun_altitude_angle: 35,
+              fog_density: 20, wetness: 80, precipitation_deposits: 60}
+    lidar_noise: {noise_stddev: 0.022, dropoff_general_rate: 0.18}
+  - name: "foggy_morning"
+    weather: {cloudiness: 40, precipitation: 0, sun_altitude_angle: 20,
+              fog_density: 60, fog_distance: 10, wetness: 20}
+    lidar_noise: {noise_stddev: 0.018, dropoff_general_rate: 0.12}
+  - name: "light_fog_noon"
+    weather: {cloudiness: 30, precipitation: 0, sun_altitude_angle: 65,
+              fog_density: 25, fog_distance: 25, wetness: 0}
+    lidar_noise: {noise_stddev: 0.010, dropoff_general_rate: 0.05}
+  - name: "night_clear"
+    weather: {cloudiness: 15, precipitation: 0, sun_altitude_angle: -8,
+              fog_density: 5, wetness: 0}
+    lidar_noise: 0.007
+  - name: "night_damp"
+    weather: {cloudiness: 40, precipitation: 0, sun_altitude_angle: -6,
+              fog_density: 10, wetness: 60, precipitation_deposits: 40}
+    lidar_noise: 0.009
+
 
 output:
   dataset_dir: "../../dataset"
