@@ -61,6 +61,10 @@ class SyncSensorRig:
         mount = carla.Transform(carla.Location(
             x=lc["mount"]["x"], y=lc["mount"]["y"], z=lc["mount"]["z"]))
         self.lidar_mount = mount
+        # Full 4x4 LiDAR->ego pose (rotation + translation) in CARLA left-handed
+        # frame. Rotation is identity here (LiDAR not tilted), but we store the
+        # whole matrix so consumers never have to ASSUME the orientation.
+        self.lidar_extrinsic = np.array(mount.get_matrix(), dtype=np.float64)
         sensor = self.world.spawn_actor(bp, mount, attach_to=self.vehicle,
                                         attachment_type=carla.AttachmentType.Rigid)
         q = queue.Queue()
@@ -218,7 +222,21 @@ class SyncSensorRig:
         lm = self.lidar_mount
         calib = {
             "lidar_mount_xyz": [lm.location.x, lm.location.y, lm.location.z],
+            # Full LiDAR->ego pose (4x4, CARLA left-handed). Use this for the
+            # transform chain; lidar_mount_xyz is kept for convenience/back-compat.
+            "extrinsic_lidar_from_ego_carla": self.lidar_extrinsic.tolist(),
             "cameras": {},
+            # How to read the camera extrinsics below. The extrinsic is the
+            # camera BODY pose in the CARLA (left-handed, x-forward) ego frame.
+            # To project a point to pixels you must additionally apply the
+            # optical-frame rotation (x,y,z)->(y,-z,x) BEFORE multiplying by K,
+            # exactly as projection_2d.py does. The extrinsic alone is NOT the
+            # ego->pixel matrix.
+            "camera_extrinsic_convention": {
+                "frame": "camera body pose in CARLA left-handed ego frame",
+                "optical_remap_before_K": "(x,y,z) -> (y,-z,x)",
+                "note": "K expects the optical frame, not the CARLA body frame.",
+            },
         }
         for cam in self.cfg["cameras"]:
             name = cam["name"]

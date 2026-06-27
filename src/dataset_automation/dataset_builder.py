@@ -143,18 +143,6 @@ def verify(out_dir, manifest, logger):
     return len(missing) == 0
 
 
-def wipe_stale_cones(world, client, logger):
-    # At startup (and after a resumed stop) the world may still hold cones from
-    # an interrupted scene. Remove them so a new scene's cones don't overlap
-    # leftovers. Reuses track_spawner's cone detection.
-    from track_spawner import clean_previous_track
-    try:
-        clean_previous_track(world, client)
-        logger.info("Startup: cleared any stale cones from a previous run.")
-    except Exception as e:
-        logger.warning(f"Startup cone cleanup failed (continuing): {e}")
-
-
 def connect(cfg, logger):
     client = carla.Client(cfg["carla"]["host"], cfg["carla"]["port"])
     client.set_timeout(cfg["carla"].get("timeout", 20.0))
@@ -194,7 +182,6 @@ def main():
         return
 
     client, world, original_settings = connect(cfg, logger)
-    wipe_stale_cones(world, client, logger)
 
     total_done = 0
     total_frames = 0
