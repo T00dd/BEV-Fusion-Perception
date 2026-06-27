@@ -49,11 +49,11 @@ class WarmupConfig:
     
     #learning rate differenziato: basso sul backbone, alto sulla head
     backbone_lr: float = 1e-5
-    head_lr: float = 1e-3
+    head_lr: float = 3e-4
     weight_decay: float = 1e-4
     
     #scheduler
-    warmup_epochs: int = 2  # warmup lineare del lr nelle prime epoche
+    warmup_epochs: int = 3  # warmup lineare del lr nelle prime epoche
     
     #augmentation
 

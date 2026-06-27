@@ -85,7 +85,7 @@ def build_scheduler(optimizer , cfg: WarmupConfig, steps_per_epoch: int ):
 
     #crea lo scheduler: warmup lineare nelle prime warmup_epochs, successivamente cosine annealing fino alla fine
 
-    total_steps = cfg.num_epoch * steps_per_epoch
+    total_steps = cfg.num_epochs * steps_per_epoch
     warmup_steps = cfg.warmup_epochs * steps_per_epoch
 
     def lr(step):
@@ -204,6 +204,9 @@ def validate(
             predictions = model(images)
             loss, log_dict = loss_fn(predictions, targets)
 
+        #DEBUG
+        print("max pred heatmap prob:", torch.sigmoid(predictions["heatmap_logits"]).max().item())
+
 
         for k, v in log_dict.items():
             sum_losses[k] += v
@@ -258,6 +261,7 @@ def save_backbone(model, cfg:WarmupConfig, name: str = "backbone.pth"):
 
     backbone_state = {f"backbone.{k}": v for k, v in model.backbone.state_dict().items()}
     out_path = cfg.models_dir / name
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
         "backbone_state_dict": backbone_state,
         "backbone_name": cfg.backbone_name,
@@ -290,7 +294,7 @@ def main():
         #se la loss non scende c'è un bug nella pipeline
         cfg.num_epochs = 200
         cfg.batch_size = 4
-        cfg.val_every_n_epochs = 20
+        cfg.val_every_n_epochs = 5
         
 
     print(f"[Config] Dataset: {cfg.dataset_root}")
@@ -318,10 +322,10 @@ def main():
     #info modello
     total_params = sum(p.numel() for p in model.parameters())
     bb_params = sum(p.numel() for p in model.backbone.parameters())
-    hd_params = sum(p.numel() for p in model.head.parameters())
+    #hd_params = sum(p.numel() for p in model.head.parameters())
     print(f"[Model] Totale parametri: {total_params/1e6:.2f}M")
     print(f"[Model] -Backbone: {bb_params/1e6:.2f}M")
-    print(f"[Model] -Head: {hd_params/1e6:.2f}M")
+    #print(f"[Model] -Head: {hd_params/1e6:.2f}M")
 
 
     loss_fn = WarmupLoss(
@@ -329,11 +333,11 @@ def main():
         offset_weight=cfg.offset_loss_weight,
         focal_alpha=cfg.focal_alpha,
         focal_beta=cfg.focal_beta,
-    ).to(cfg.device)
+    ).to("cuda")
 
 
     #optimizer differenziato tra backbone ed head
-    param_groups = model.get_param_groups(
+    param_groups = model.get_param(
         backbone_lr=cfg.backbone_lr,
         head_lr=cfg.head_lr,
         weight_decay=cfg.weight_decay,

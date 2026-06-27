@@ -28,6 +28,7 @@ class DetectionHead2d(nn.Module):
             layers.append(nn.BatchNorm2d(hidden_channels))
             layers.append(nn.ReLU(inplace=True))
             current_channels = hidden_channels
+            
         self.trunk = nn.Sequential(*layers)
 
         #head per heatmap
@@ -43,7 +44,7 @@ class DetectionHead2d(nn.Module):
         nn.init.normal_(self.heatmap_head.weight, std=0.01)
 
         nn.init.normal_(self.offset_head.weight, std=0.01)
-        nn.init.zeros_(self.heatmap_head.bias)
+        nn.init.zeros_(self.offset_head.bias)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         x= self.trunk(x)
@@ -83,7 +84,7 @@ class HRNet_with_detection_head(nn.Module):
         print(f"Using feature index: {feature_index}")
 
         #head per detection 2d
-        self.detection_head = DetectionHead2d(
+        self.head = DetectionHead2d(
             in_channels=feature_channels,
             hidden_channels=head_hidden_channels,
             num_classes=num_classes,
@@ -100,7 +101,6 @@ class HRNet_with_detection_head(nn.Module):
         heatmap_logits, offset_pred = self.head(feature_map)
 
         return{
-
             "heatmap_logits": heatmap_logits,
             "offset_pred": offset_pred,
             "feature_map": feature_map, #returniamo anche le feature per futura visualizzazione oopure debug
@@ -113,7 +113,7 @@ class HRNet_with_detection_head(nn.Module):
 
         return [
             {"params": self.backbone.parameters(), "lr": backbone_lr, "weight_decay": weight_decay},
-            {"params": self.detection_head.parameters(), "lr": head_lr, "weight_decay": weight_decay},
+            {"params": self.head.parameters(), "lr": head_lr, "weight_decay": weight_decay},
         ]
 
         

@@ -13,7 +13,7 @@ class CenterNetFocalLoss(nn.Module):
     #per pixel con heatmap_gt < 1: L_neg = -(1-heatmap_gt)^beta * p^alpha * log(1-p)
 
 
-    def __init__(self, alpha: float = 2.0, beta: float = 4.0, eps: float = 1e-6):
+    def __init__(self, alpha: float = 2.0, beta: float = 4.0, eps: float = 1e-4):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
@@ -21,10 +21,13 @@ class CenterNetFocalLoss(nn.Module):
 
     def forward(self, heatmap_logits: torch.Tensor, gt_heatmap: torch.Tensor) -> torch.Tensor:
 
+        heatmap_logits = heatmap_logits.float()
+        gt_heatmap = gt_heatmap.float()
+
         pred = torch.sigmoid(heatmap_logits).clamp(self.eps, 1-self.eps)
 
-        pos_mask = (gt_heatmap == 1.0).float()
-        neg_mask = (gt_heatmap < 1.0).float()
+        pos_mask = (gt_heatmap >= 0.9).float()
+        neg_mask = (gt_heatmap < 0.9).float()
 
         #loss positivi
         pos_loss = -((1 - pred) ** self.alpha) * torch.log(pred) * pos_mask
@@ -51,6 +54,11 @@ class OffsetL1Loss(nn.Module):
         #offset_pred (B, 2, H, W)
         #offset_gt (B, 2, H, W)
         #offset_mask (B, 1, H, W)
+        offset_pred = offset_pred.float()
+        offset_gt = offset_gt.float()
+
+        if offset_mask.dim() == 3:
+            offset_mask = offset_mask.unsqueeze(1)
 
         loss_per_pixel = F.l1_loss(offset_pred, offset_gt, reduction="none") #(B, 2, H, W)
         loss_per_pixel = loss_per_pixel * offset_mask #zero fuori dai centri
@@ -91,12 +99,12 @@ class WarmupLoss(nn.Module):
         loss_focal = self.focal_loss(predictions["heatmap_logits"], targets["heatmap"])
         loss_offset = self.offset_loss(predictions["offset_pred"], targets["offset"], targets["offset_mask"])
 
-        total_loss = self.focal_weight * loss_focal + self.offset_weight * loss_offset
+        loss_total = self.focal_weight * loss_focal + self.offset_weight * loss_offset
 
         log_dict = {
             "loss_focal": loss_focal.item(),
             "loss_offset": loss_offset.item(),
-            "total_loss": total_loss.item()
+            "loss_total": loss_total.item()
         }
 
-        return total_loss, log_dict
+        return loss_total, log_dict

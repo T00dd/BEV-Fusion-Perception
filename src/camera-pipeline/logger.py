@@ -10,7 +10,7 @@ class TrainingLogger:
     def __init__(self, output_dir: Path, log_every_n_steps: int = 50):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.log_every_n_step = log_every_n_steps
+        self.log_every_n_steps = log_every_n_steps
 
         self.step_log_path = self.output_dir / "step_log.csv"
         self.epoch_log_path = self.output_dir / "epoch_log.csv"
@@ -22,6 +22,10 @@ class TrainingLogger:
         
         self.step_keys = None
         self.epoch_keys = None
+
+        #conserviamo tutte le righe scritte cosi' da poter riscrivere il csv se compaiono chiavi nuove (es. epoche con validation vs senza)
+        self.step_rows = []
+        self.epoch_rows = []
 
         self.start_time = time.time()
 
@@ -40,6 +44,25 @@ class TrainingLogger:
             self.epoch_writer = csv.DictWriter(self.epoch_file, fieldnames=self.epoch_keys)
             self.epoch_writer.writeheader()
 
+    def _rewrite_step_csv(self):
+        #se compaiono chiavi nuove riscriviamo l'intero csv con tutte le colonne
+        self.step_file.close()
+        self.step_file = open(self.step_log_path, "w", newline="")
+        self.step_writer = csv.DictWriter(self.step_file, fieldnames=self.step_keys)
+        self.step_writer.writeheader()
+        for r in self.step_rows:
+            self.step_writer.writerow(r)
+        self.step_file.flush()
+
+    def _rewrite_epoch_csv(self):
+        #se compaiono chiavi nuove riscriviamo l'intero csv con tutte le colonne
+        self.epoch_file.close()
+        self.epoch_file = open(self.epoch_log_path, "w", newline="")
+        self.epoch_writer = csv.DictWriter(self.epoch_file, fieldnames=self.epoch_keys)
+        self.epoch_writer.writeheader()
+        for r in self.epoch_rows:
+            self.epoch_writer.writerow(r)
+        self.epoch_file.flush()
 
     def log_step(
         self,
@@ -53,9 +76,18 @@ class TrainingLogger:
         
         row = {"epoch": epoch, "global_step": global_step, "lr_backbone": lr_backbone, "lr_head": lr_head}
         row.update(log_dict)
-        self.step_writer.writerow(row)
-        self.step_file.flush()
-        
+
+        #se ci sono chiavi nuove le aggiungiamo alle colonne e riscriviamo il csv
+        new_keys = [k for k in row.keys() if k not in self.step_keys]
+        if new_keys:
+            self.step_keys = self.step_keys + new_keys
+            self.step_rows.append(row)
+            self._rewrite_step_csv()
+        else:
+            self.step_rows.append(row)
+            self.step_writer.writerow(row)
+            self.step_file.flush()
+
         if global_step % self.log_every_n_steps == 0:
             metrics_str = " | ".join(f"{k}={v:.4f}" for k, v in log_dict.items())
             print(f"[Step {global_step:6d} | Ep {epoch:3d}] {metrics_str} | lr_bb={lr_backbone:.2e} lr_hd={lr_head:.2e}")
@@ -67,9 +99,18 @@ class TrainingLogger:
         elapsed = time.time() - self.start_time
         row = {"epoch": epoch, "elapsed_time_s": elapsed}
         row.update(log_dict)
-        self.epoch_writer.writerow(row)
-        self.epoch_file.flush()
-        
+
+        #se ci sono chiavi nuove le aggiungiamo alle colonne e riscriviamo il csv
+        new_keys = [k for k in row.keys() if k not in self.epoch_keys]
+        if new_keys:
+            self.epoch_keys = self.epoch_keys + new_keys
+            self.epoch_rows.append(row)
+            self._rewrite_epoch_csv()
+        else:
+            self.epoch_rows.append(row)
+            self.epoch_writer.writerow(row)
+            self.epoch_file.flush()
+
         print(f"\n==== Epoch {epoch} Summary =======")
         for k, v in log_dict.items():
             if isinstance(v, float):

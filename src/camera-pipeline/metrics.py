@@ -15,7 +15,7 @@ def extract_peaks_from_heatmap(
         heatmap: torch.Tensor,
         offset: torch.Tensor,
         stride: int,
-        threshold: float = 0.5,
+        threshold: float = 0.2,
         nms_kernel_size: int = 3,
         max_detections: int = 100,
 ) -> List[Dict]:
@@ -112,9 +112,9 @@ def match_detections_to_gt(
         for i, gt in enumerate(gt_items):
             if gt["matched"]:
                 continue
-            if gt["class"] != det["class"]:
+            if gt["class"] != det["class_id"]:   # entrambi usano "class_id"
                 continue
-            dist = np.sqrt((det["x_px"] - gt["x_px"]) ** 2 + (det["y_px"] - gt["y_px"]) ** 2)
+            dist = np.sqrt((det["x"] - gt["x_px"]) ** 2 + (det["y"] - gt["y_px"]) ** 2)
             if dist < match_radius_px and dist < best_dist:
                 best_dist = dist
                 best_idx = i

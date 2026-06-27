@@ -78,6 +78,7 @@ def generate_heatmap_offset_mask(
         #genera gaussiana 2d centrata sul cono
         gauss = gaussian_2d((H_feat, W_feat), (cx_feat, cy_feat), sigma)
 
+        gauss[cy_feat_int, cx_feat_int] = 1.0
         heatmap[class_idx] = np.maximum(heatmap[class_idx], gauss)
 
         #crea offset e offset mask

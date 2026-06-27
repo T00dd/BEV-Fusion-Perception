@@ -1,1 +1,4 @@
 src/camera-pipeline/__pycache__
+src/visualizations
+src/models
+src/camera-pipeline/checkpoints

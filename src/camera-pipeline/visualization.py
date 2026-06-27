@@ -69,6 +69,17 @@ def visualize_predictions(
     gt_rgb = color_heatmap(gt_up)
     pred_rgb = color_heatmap(pred_up)
 
+    #sovrapposizione: blend 50/50 tra immagine e heatmap
+    overlay_gt = (0.5 * image + 0.5 * gt_rgb).astype(np.uint8)
+    overlay_pred = (0.5 * image + 0.5 * pred_rgb).astype(np.uint8)
+    
+    #concatena horizontalmente: [originale | GT | predetta]
+    panel = np.concatenate([image, overlay_gt, overlay_pred], axis=1)
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(panel).save(output_path)
+
+
 
 
 def save_visualization_batch(
