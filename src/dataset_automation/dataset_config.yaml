@@ -26,25 +26,22 @@ cones:
     orange_small: [0.23, 0.23, 0.32]
     orange_big:   [0.28, 0.28, 0.50]
 
+# ONE scenes block (the previous file had it twice; YAML kept only the last,
+# silently dropping zones/split_ratios/seed). Everything per-scene is here.
 scenes:
-  count: 45
+  count: 900                     # ~30k frames at ~33 frames/scene (see capture)
   split_ratios: {train: 0.7, val: 0.15, test: 0.15}
   split_seed: 0
   geometry_seed: 0               # seeds per-scene zone + track randomisation
-  # Per-scene variety (frozen into the manifest for reproducibility):
-  zones: [1, 2]           
-scenes:
-  count: 45
-  split_ratios: {train: 0.7, val: 0.15, test: 0.15}
-  split_seed: 0       # scenes alternate randomly across these
-  lobes_min: 2                   # constant floor of curves (>=2-3 recommended)
-  lobes_max_min: 4               # per-scene curve ceiling drawn in
-  lobes_max_max: 7               # [lobes_max_min, lobes_max_max]
+  zones: [1, 2]                  # scenes alternate randomly across these
+  lobes_min: 2                   # LOW floor: some tracks stay simple/near-straight
+  lobes_max_min: 5               # per-scene curve ceiling drawn in
+  lobes_max_max: 9               # [lobes_max_min, lobes_max_max] -> up to tortuous
 
 capture:
-  max_frames_per_scene: 30
+  max_frames_per_scene: 50       # cap; long tracks fill more, short ones less
   warmup_ticks: 10
-  capture_every_n_ticks: 50
+  capture_every_n_ticks: 15      # 1 frame ~every 6 m at 8 m/s -> ~33 frames/scene
 
 ego:
   blueprint: "vehicle.audi.tt"
@@ -130,14 +127,13 @@ conditions:
               fog_density: 25, fog_distance: 25, wetness: 0}
     lidar_noise: {noise_stddev: 0.010, dropoff_general_rate: 0.05}
   - name: "night_clear"
-    weather: {cloudiness: 15, precipitation: 0, sun_altitude_angle: -8,
+    weather: {cloudiness: 15, precipitation: 0, sun_altitude_angle: 2,
               fog_density: 5, wetness: 0}
     lidar_noise: 0.007
   - name: "night_damp"
-    weather: {cloudiness: 40, precipitation: 0, sun_altitude_angle: -6,
+    weather: {cloudiness: 40, precipitation: 0, sun_altitude_angle: 2,
               fog_density: 10, wetness: 60, precipitation_deposits: 40}
     lidar_noise: 0.009
-
 
 output:
   dataset_dir: "../../dataset"
