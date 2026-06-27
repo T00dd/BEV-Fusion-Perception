@@ -91,6 +91,67 @@ def _dump_labels_readable(scene_path, frame_idx, cones):
     lines.append("}")
     Path(scene_path).write_text("\n".join(lines))
 
+def _spawn_track_with_valid_centerline(client, scene_meta, zone, lobes_range,
+                                       ground_z, repo_root, logger, scene_id,
+                                       max_attempts=8):
+    base_seed = scene_meta.get("track_seed")
+    last_err = None
+
+    for attempt in range(max_attempts):
+        seed = base_seed if attempt == 0 else (base_seed or 0) + attempt * 7919
+
+        result = generate_and_spawn_track(
+            seed=seed,
+            zone=zone,
+            lobes_range=lobes_range,
+            draw_debug_arena=False,
+        )
+
+        cones, _sx, _sy, _scale, cone_actors = result[0], result[1], result[2], result[3], result[4]
+
+        try:
+            waypoints = compute_centerline_carla(
+                cones,
+                0.0,
+                0.0,
+                carla_scale=1.0,
+                data_dir=repo_root / "data",
+                reconstructor_bin=repo_root / "build/track_to_centerline",
+                z=ground_z,
+            )
+
+            wp = np.asarray(waypoints)
+
+            if wp.ndim == 2 and wp.shape[0] >= 2:
+                return cones, cone_actors, waypoints
+
+            last_err = f"degenerate centerline ({wp.shape})"
+
+        except Exception as e:
+            last_err = str(e)
+
+        logger.warning(
+            f"[{scene_id}] track attempt {attempt+1}/{max_attempts} "
+            f">>>> failed ({last_err}); retrying with a new seed <<<<."
+        )
+
+        if cone_actors:
+            try:
+                client.apply_batch_sync(
+                    [carla.command.DestroyActor(c.id) for c in cone_actors],
+                    True,
+                )
+            except Exception:
+                for c in cone_actors:
+                    try:
+                        c.destroy()
+                    except Exception:
+                        pass
+
+    raise RuntimeError(
+        f"Could not build a valid centerline after {max_attempts} attempts."
+    )
+
 
 def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
                  scene_meta=None):
@@ -111,60 +172,64 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
     ground_z = GROUND_Z_BY_ZONE.get(zone, 237.0)
 
     #  Track + cones (cleaning previous cones incorporated)
-    logger.info(f"[{scene_id}] generating + spawning track (zone={zone})")
+
     lobes_range = None
     if "lobes_min" in scene_meta and "lobes_max" in scene_meta:
-        lobes_range = (scene_meta["lobes_min"], scene_meta["lobes_max"])
-    cones, start_x, start_y, scale, cone_actors = generate_and_spawn_track(
-        seed=scene_meta.get("track_seed"),
-        zone=zone,
-        lobes_range=lobes_range,
-        draw_debug_arena=False,   # debug outline would pollute camera frames
-    )
+        lobes_range = (
+            scene_meta["lobes_min"],
+            scene_meta["lobes_max"],
+        )
 
     repo_root = Path(__file__).resolve().parents[2]
-    waypoints = compute_centerline_carla(
-        cones,
-        0.0,                       # start_x neutralised
-        0.0,                       # start_y neutralised
-        carla_scale=1.0,           # no scaling
-        data_dir=repo_root / "data",
-        reconstructor_bin=repo_root / "build/track_to_centerline",
-        z=ground_z,                # centerline at the zone's ground height
-    )
 
-    # Spawn ego at first waypoint, facing the path, at ground height.
-    bp = world.get_blueprint_library().find(cfg["ego"]["blueprint"])
-    first = waypoints[0]
-    ahead = waypoints[min(5, len(waypoints) - 1)]
-    yaw = math.degrees(math.atan2(ahead[1] - first[1], ahead[0] - first[0]))
-    tf = carla.Transform(
-        carla.Location(x=float(first[0]), y=float(first[1]), z=ground_z + 0.5),
-        carla.Rotation(yaw=yaw))
-    vehicle = world.spawn_actor(bp, tf)
-    logger.info(f"[{scene_id}] ego spawn z={tf.location.z:.1f}, "
-                f"first wp=({first[0]:.1f},{first[1]:.1f},{first[2]:.1f}), "
-                f"ground_z={ground_z:.1f}")
-
-    controller = PurePursuitController(
-        waypoints,
-        target_speed=cfg["ego"]["target_speed"],
-        lookahead=cfg["ego"]["lookahead"])
-
-    # Sensor config with this scene's LiDAR noise folded in (orthogonal to weather).
-    scene_sensors_cfg = sensors_cfg_for_condition(cfg, condition)
-    rig = SyncSensorRig(world, vehicle, scene_sensors_cfg)
-
-    # Calibration is per-scene, written up front.
-    _write_calib(scene_dir, rig, condition, scene_meta)
+    cone_actors = []
+    vehicle = None
+    rig = None
 
     ego_pose_rows = []
     frames_written = 0
-    max_frames = cfg["capture"]["max_frames_per_scene"]
-    warmup = cfg["capture"].get("warmup_ticks", 10)
-    every = cfg["capture"].get("capture_every_n_ticks", 1)
 
     try:
+        logger.info(f"[{scene_id}] generating + spawning track (zone={zone})")
+        cones, cone_actors, waypoints = _spawn_track_with_valid_centerline(
+            client,
+            scene_meta,
+            zone,
+            lobes_range,
+            ground_z,
+            repo_root,
+            logger,
+            scene_id,
+        )
+        # Spawn ego at first waypoint, facing the path, at ground height.
+        bp = world.get_blueprint_library().find(cfg["ego"]["blueprint"])
+        first = waypoints[0]
+        ahead = waypoints[min(5, len(waypoints) - 1)]
+        yaw = math.degrees(math.atan2(ahead[1] - first[1], ahead[0] - first[0]))
+        tf = carla.Transform(
+            carla.Location(x=float(first[0]), y=float(first[1]), z=ground_z + 0.5),
+            carla.Rotation(yaw=yaw))
+        vehicle = world.spawn_actor(bp, tf)
+        logger.info(f"[{scene_id}] ego spawn z={tf.location.z:.1f}, "
+                    f"first wp=({first[0]:.1f},{first[1]:.1f},{first[2]:.1f}), "
+                    f"ground_z={ground_z:.1f}")
+
+        controller = PurePursuitController(
+            waypoints,
+            target_speed=cfg["ego"]["target_speed"],
+            lookahead=cfg["ego"]["lookahead"])
+
+        # Sensor config with this scene's LiDAR noise folded in (orthogonal to weather).
+        scene_sensors_cfg = sensors_cfg_for_condition(cfg, condition)
+        rig = SyncSensorRig(world, vehicle, scene_sensors_cfg)
+
+        # Calibration is per-scene, written up front.
+        _write_calib(scene_dir, rig, condition, scene_meta)
+
+        max_frames = cfg["capture"]["max_frames_per_scene"]
+        warmup = cfg["capture"].get("warmup_ticks", 10)
+        every = cfg["capture"].get("capture_every_n_ticks", 1)
+
         # Let physics/sensors settle before recording.
         for _ in range(warmup):
             vehicle.apply_control(controller.step(vehicle))
@@ -257,14 +322,30 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
             wtr.writerows(ego_pose_rows)
 
     finally:
-        rig.destroy()
-        try:
-            vehicle.destroy()
-        except Exception:
-            pass
+        if rig is not None:
+            try:
+                rig.destroy()
+            except Exception:
+                pass
+
+        if vehicle is not None:
+            try:
+                vehicle.destroy()
+            except Exception:
+                pass
+
         if cone_actors:
-            client.apply_batch_sync(
-                [carla.command.DestroyActor(c.id) for c in cone_actors], True)
+            try:
+                client.apply_batch_sync(
+                    [carla.command.DestroyActor(c.id) for c in cone_actors],
+                    True,
+                )
+            except Exception:
+                for c in cone_actors:
+                    try:
+                        c.destroy()
+                    except Exception:
+                        pass
 
     if frames_written == 0:
         raise RuntimeError("no frames written")
