@@ -6,7 +6,7 @@ from typing import Tuple
 @dataclass
 class WarmupConfig:
     #path
-    dataset_root: Path = Path("../../../dataset_carla_testing_small_zone1_nocurves")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
+    dataset_root: Path = Path("../../../dataset")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
     output_dir: Path = Path("./checkpoints/warmup")
     models_dir: Path = Path("../models")
     
@@ -44,7 +44,7 @@ class WarmupConfig:
     
     #training
     num_epochs: int = 30
-    batch_size: int = 16
+    batch_size: int = 8
     num_workers: int = 8
     
     #learning rate differenziato: basso sul backbone, alto sulla head
