@@ -45,7 +45,7 @@ class WarmupConfig:
     #training
     num_epochs: int = 30
     batch_size: int = 8
-    num_workers: int = 8
+    num_workers: int = 12
     
     #learning rate differenziato: basso sul backbone, alto sulla head
     backbone_lr: float = 1e-5

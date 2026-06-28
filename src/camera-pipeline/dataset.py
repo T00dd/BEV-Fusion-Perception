@@ -57,10 +57,6 @@ def generate_heatmap_offset_mask(
         if not cone.get("fully_in_image", True):
             continue
 
-        #salta i coni che distano piu' di 50m
-        if cone.get("depth_m", 0.0) > max_depth:
-            continue
-
         color = cone["color"]
         if color not in color_to_class:
             continue

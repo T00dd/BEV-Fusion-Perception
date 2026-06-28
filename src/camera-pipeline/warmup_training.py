@@ -204,9 +204,6 @@ def validate(
             predictions = model(images)
             loss, log_dict = loss_fn(predictions, targets)
 
-        #DEBUG
-        print("max pred heatmap prob:", torch.sigmoid(predictions["heatmap_logits"]).max().item())
-
 
         for k, v in log_dict.items():
             sum_losses[k] += v
@@ -355,7 +352,7 @@ def main():
     val_accumulator = ValidationAccumulator(
         dataset_root=cfg.dataset_root,
         stride=cfg.heatmap_stride,
-        threshold=0.3,
+        threshold=0.2,
         match_radius_px=10.0,
     )
 
