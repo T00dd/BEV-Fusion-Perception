@@ -127,8 +127,8 @@ conditions:
               fog_density: 25, fog_distance: 25, wetness: 0}
     lidar_noise: {noise_stddev: 0.010, dropoff_general_rate: 0.05}
   - name: "night_clear"
-    weather: {cloudiness: 15, precipitation: 0, sun_altitude_angle: 2,
-              fog_density: 5, wetness: 0}
+    weather: {cloudiness: 15, precipitation: 0, sun_altitude_angle: 4,
+              fog_density: 5, wetness: 20, precipitation_deposits: 10}
     lidar_noise: 0.007
   - name: "night_damp"
     weather: {cloudiness: 40, precipitation: 0, sun_altitude_angle: 2,
