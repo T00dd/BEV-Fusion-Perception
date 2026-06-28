@@ -42,6 +42,8 @@ def generate_heatmap_offset_mask(
     H, W = image_size
     H_feat, W_feat = H // stride, W // stride
 
+    max_depth = 50.0
+
     heatmap = np.zeros((num_classes, H_feat, W_feat), dtype=np.float32)
     offset = np.zeros((2, H_feat, W_feat), dtype=np.float32)
     offset_mask = np.zeros((H_feat, W_feat), dtype=np.float32)
@@ -53,6 +55,10 @@ def generate_heatmap_offset_mask(
 
     for cone in cones:
         if not cone.get("fully_in_image", True):
+            continue
+
+        #salta i coni che distano piu' di 50m
+        if cone.get("depth_m", 0.0) > max_depth:
             continue
 
         color = cone["color"]
