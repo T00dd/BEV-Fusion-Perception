@@ -16,8 +16,8 @@ DELETE_POLES = True
 
 CONE_MAPPING = {
     'BlueCone':   'static.prop.bluecone',
-    'OrangeCone': 'static.prop.orangecone',
     'YellowCone': 'static.prop.yellowcone',
+    'OrangeCone': 'static.prop.orangecone',
     'RedCone':    'static.prop.redcone',
 }
 
@@ -55,6 +55,16 @@ def wipe_all_cones(client, world):
     if not cones:
         print("No cones found to wipe.")
         return
+
+    # --- AGGIUNTA DEBUG PER LEGGERE I NOMI ---
+    print("\n--- NOMI DEI CONI TROVATI (Usa questi in CONE_MAPPING) ---")
+    for a in cones:
+        # Recupera il nome reale della mesh esportata da UE4
+        mesh_path = a.attributes.get('mesh_path', 'Attributo non presente')
+        print(f"Actor ID: {a.id} | Type: {a.type_id} | MESH_PATH: {mesh_path}")
+    print("-------------------------------------------------------------\n")
+    # -----------------------------------------
+
     client.apply_batch_sync(
         [carla.command.DestroyActor(a.id) for a in cones], True
     )
