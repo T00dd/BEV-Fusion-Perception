@@ -25,6 +25,7 @@ class ConeDataset(DatasetTemplate):
 
         # number of columns in .bin files, e.g. 4 for x,y,z,intensity
         self.num_point_features = len(self.dataset_cfg.POINT_FEATURE_ENCODING.src_feature_list)
+        self.min_points_for_gt = self.dataset_cfg.get('MIN_POINTS_FOR_GT', 1)
 
         self.sample_list = self._build_sample_list()
         if self.logger is not None:
@@ -33,8 +34,8 @@ class ConeDataset(DatasetTemplate):
     def _build_sample_list(self):
 
         # expand each scene in sample frames. Split remains per scene, but sample_list is per frame
-        split_file = self.splits_dir / f'{self.split}.txt'
-        assert split_file.exists(), (f'Split file not found: {split_file}')
+        split_file = self.split_dir / f'{self.split}.txt'
+        assert split_file.exists(), f'Manca lo split file: {split_file}'
 
         scenes = [ln.strip() for ln in open(split_file) if ln.strip()]
         self._num_scenes = len(scenes)
@@ -44,7 +45,7 @@ class ConeDataset(DatasetTemplate):
             lidar_dir = self.scene_dir / scene / 'lidar'
             if not lidar_dir.exists():
                 if self.logger is not None:
-                    self.logger.warning(f'Scene {scene} does not contain a lidar directory, skipping')
+                    self.logger.warning(f'scena senza cartella lidar, salto: {scene}')
                 continue
             for bin_path in sorted(lidar_dir.glob('*.bin')):
                 samples.append((scene, bin_path.stem))
@@ -62,7 +63,7 @@ class ConeDataset(DatasetTemplate):
         return pts.reshape(-1, self.num_point_features)
     
     def get_label(self, scene, frame_name):
-        path = self.scenes_dir / scene / 'labels' / f'{frame_name}.json'
+        path = self.scene_dir / scene / 'labels' / f'{frame_name}.json'
         if not path.exists():
             return (np.zeros((0, 7), np.float32),
                     np.zeros(0, dtype='<U16'),
