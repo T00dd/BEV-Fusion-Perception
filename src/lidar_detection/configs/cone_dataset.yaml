@@ -1,0 +1,81 @@
+DATASET: 'ConeDataset'
+
+DATA_PATH: '/home/andrea/tesi/BEV-Fusion-Perception/dataset'
+
+POINT_CLOUD_RANGE: [0, -25, -3, 50, 25, 1]
+
+DATA_SPLIT:
+  train: train
+  test: val
+
+INFO_PATH:
+  train: [cone_infos_train.pkl]
+  test: [cone_infos_val.pkl]
+
+# simple placeholder for KITTY-style evaluation
+# we'll use our own metrics based on spikes
+MAP_CLASS_TO_KITTI: {
+  'blue': 'Pedestrian',
+  'yellow': 'Pedestrian',
+}
+
+GET_ITEM_LIST: [
+  "points"
+]
+FOV_POINTS_ONLY: False
+
+# during training, discard cones with less than N points
+MIN_POINTS_IN_GT: 1
+
+POINT_FEATURE_ENCODING: {
+  encoding_type: absolute_coordinates_encoding,
+  used_feature_list: ['x', 'y', 'z', 'intensity'],
+  src_feature_list: ['x', 'y', 'z', 'intensity'],
+}
+
+DATA_PROCESSOR:
+  # cut the point cloud to the range of interest
+  - NAME: mask_points_and_boxes_outside_range
+    REMOVE_OUTSIDE_BOXES: True
+  
+  # randomly shuffle points order to avoid spurious correlations
+  - NAME: shuffle_points
+    SHUFFLE_ENABLED: {
+      'train': True,
+      'test': False
+    }
+  
+  - NAME: transform_points_to_voxels
+    VOXEL_SIZE: [0.05, 0.05, 0.1]
+    MAX_POINTS_PER_VOXEL: 5
+    MAX_NUMBER_OF_VOXELS: {
+      'train': 16000,
+      'test': 40000
+    }
+
+DATA_AUGMENTOR:
+  DISABLE_AUG_LIST: ['placeholder', 'gt_sampling']
+  AUG_CONFIG_LIST:
+    - NAME: gt_sampling
+      USE_ROAD_PLANE: False
+      DB_INFO_PATH:
+        - cone_dbinfos_train.pkl
+      PREPARE: {
+        filter_by_min_points: ['blue:1', 'yellow:1'],
+      }
+      SAMPLE_GROUPS: ['blue:8', 'yellow:8']
+      NUM_POINT_FEATURES: 4
+      DATABASE_WITH_FAKELIDAR: False
+      REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
+      # avoid strange artifacts when gt_sampling
+      LIMIT_WHOLE_SCENE: True
+
+    - NAME: random_world_flip
+      ALONG_AXIS_LIST: ['x']
+
+    - NAME: random_world_rotation
+      WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+
+    - NAME: random_world_scaling
+      WORLD_SCALE_RANGE: [0.95, 1.05]
+

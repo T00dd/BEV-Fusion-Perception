@@ -1,0 +1,111 @@
+# config file for custom SECOND + CenterPoint backbone for LiDAR branch
+# inherits params from cone_dataset.yaml
+
+CLASS_NAMES: ['blue', 'yellow']
+
+DATA_CONFIG:
+  _BASE_CONFIG_: src/lidar_detection/configs/cone_dataset.yaml
+
+MODEL:
+  NAME: CenterPoint
+
+  VFE:
+    NAME: MeanVFE
+
+  BACKBONE_3D:
+    NAME: VoxelBackBone8x  # classic sparse backbone with 8x downsampling in x and y plane
+  
+  MAP_TO_BEV:
+    NAME: HeightCompression  # compress height dimension to get BEV feature map
+    NUM_BEV_FEATURES: 256  # suits for z = [-3, 1] with voxel size = [0.05, 0.05, 0.1]
+
+  BACKBONE_2D:
+    # Backbone 2D in CenterPoint version: 1 block w/ stride 1 + upsample x2
+    NAME: BaseBEVBackbone
+    LAYER_NUMS: [5]
+    LAYER_STRIDES: [1]
+    NUM_FILTERS: [128]
+    UPSAMPLE_STRIDES: [2]
+    NUM_UPSAMPLE_FILTERS: [256]
+
+  DENSE_HEAD:
+      NAME: CenterHead
+      CLASS_AGNOSTIC: False
+
+      CLASS_NAMES_EACH_HEAD: [
+        ['blue', 'yellow']
+      ]
+
+      SHARED_CONV_CHANNEL: 64
+      USE_BIAS_BEFORE_NORM: True
+      NUM_HM_CONV: 2  # heatmap head depth
+
+      # separate regression heads for each class
+      # each one predicts a precise quantity
+      # center = sub-cell offset (x, y) get the precise position in the grid
+      # center_z = z coord of the cone center
+      # dim = dimensions dx, dy, dz are fixes, but we still predict them to be consistent with the original CenterPoint implementation
+      # rot = cone orientation (cos, sin), since undefined for cones it'll learn '0' for all cones
+      SEPARATE_HEAD_CFG:
+        HEAD_ORDER: ['center', 'center_z', 'dim', 'rot']
+        HEAD_DICT: {
+          'center': {'out_channels': 2, 'num_conv': 2},
+          'center_z': {'out_channels': 1, 'num_conv': 2},
+          'dim': {'out_channels': 3, 'num_conv': 2},
+          'rot': {'out_channels': 2, 'num_conv': 2}, # not used since we don't care about orientation of cones
+        }
+
+      TARGET_ASSIGNER_CONFIG:
+        FEATURE_MAP_STRIDE: 4
+        NUM_MAX_OBJS: 200  # optimistic max cone numer per frame
+        GAUSSIAN_OVERLAP: 0.1
+        MIN_RADIUS: 2  # minimum radius for the gaussian heatmap within the cells. It's equivalent to sigma
+
+      LOSS_CONFIG:
+        # heatmap: Gaussian Focal Loss. L1 regression
+        LOSS_WEIGHTS: {
+          'cls_weight': 1.0,
+          'loc_weight': 0.25, # OpenPCDet deafult, can be refined
+          'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+        }
+
+      POST_PROCESSING:
+        SCORE_THRESH: 0.1  # minimum score to keep a detection
+        POST_CENTER_LIMIT_RANGE: [0, -25, -3, 50, 25, 1]   # discard spikes outside the range
+        MAX_OBJ_PER_SAMPLE: 200
+        NMS_CONFIG:
+          NMS_TYPE: nms_gpu
+          NMS_THRESH: 0.01
+          NMS_PRE_MAXSIZE: 4096
+          NMS_POST_MAXSIZE: 500
+
+    # post processing in fact not used, to be kept for compatibility with OpenPCDet
+    # we actually use our own post-processing in the evaluation script, which is more suitable for spikes
+  POST_PROCESSING:
+    RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+    SCORE_THRESH: 0.1
+    OUTPUT_RAW_SCORE: False
+    EVAL_METRIC: kitti                  
+    NMS_CONFIG:
+      MULTI_CLASSES_NMS: False
+      NMS_TYPE: nms_gpu
+      NMS_THRESH: 0.01
+      NMS_PRE_MAXSIZE: 4096
+      NMS_POST_MAXSIZE: 500
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 4  # depends on GPU resources
+    NUM_EPOCHS: 80   # starting point, to be refined
+    OPTIMIZER: adam_onecycle
+    LR: 0.003
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [35, 45]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
+    GRAD_NORM_CLIP: 10
