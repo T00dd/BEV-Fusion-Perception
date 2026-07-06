@@ -20,6 +20,7 @@ grid:
 
 cones:
   z_is_base: true
+  orange_swap_ratio: 0.1
   dimensions:                    # metres [dx, dy, dz]
     blue:         [0.23, 0.23, 0.32]
     yellow:       [0.23, 0.23, 0.32]
@@ -136,4 +137,4 @@ conditions:
     lidar_noise: 0.009
 
 output:
-  dataset_dir: "../../dataset"
+  dataset_dir: "../../carla_dataset_branches"

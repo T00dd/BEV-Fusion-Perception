@@ -3,6 +3,7 @@ import csv
 import json
 import math
 import time
+import random
 from pathlib import Path
 
 import numpy as np
@@ -90,6 +91,78 @@ def _dump_labels_readable(scene_path, frame_idx, cones):
     lines.append("  ]")
     lines.append("}")
     Path(scene_path).write_text("\n".join(lines))
+
+def _swap_random_cones_to_orange(world, client, cone_actors, ratio, seed,
+                                 logger, scene_id,
+                                 orange_bp_id="static.prop.orangecone"):
+    if not cone_actors or ratio <= 0:
+        return cone_actors
+
+    bp_lib = world.get_blueprint_library()
+    found = bp_lib.filter(orange_bp_id)
+    if not found:
+        logger.warning(f"[{scene_id}] orange blueprint '{orange_bp_id}' non trovato.")
+        return cone_actors
+    orange_bp = found[0]
+
+    world.tick()
+
+    rng = random.Random(seed)
+    n_swap = min(len(cone_actors), max(1, int(round(ratio * len(cone_actors)))))
+    chosen = rng.sample(range(len(cone_actors)), n_swap)
+    chosen_set = set(chosen)
+
+    # Ora get_transform() conterrà le coordinate reali (Z ~ 237.0)
+    transforms = {i: cone_actors[i].get_transform() for i in chosen}
+    orig_bp_ids = {i: cone_actors[i].type_id for i in chosen}
+
+    try:
+
+        client.apply_batch_sync(
+            [carla.command.DestroyActor(cone_actors[i].id) for i in chosen], True)
+    except Exception as e:
+        logger.warning(f"[{scene_id}] orange swap: destroy batch failed ({e}); skipping.")
+        return cone_actors
+
+    survivors = [a for i, a in enumerate(cone_actors) if i not in chosen_set]
+    swapped = 0
+    restored = 0
+
+    for i in chosen:
+        tf = transforms[i]
+        
+        safe_z = tf.location.z
+        if safe_z < 100.0:
+            safe_z = 237.1
+        else:
+            safe_z += 0.1
+        
+        clean_tf = carla.Transform(
+            carla.Location(tf.location.x, tf.location.y, safe_z),
+            carla.Rotation(0, 0, 0)
+        )
+        
+        actor = world.try_spawn_actor(orange_bp, clean_tf)
+        
+        if actor is not None:
+            actor.set_simulate_physics(True)
+            swapped += 1
+            survivors.append(actor)
+        else:
+            # Fallback
+            clean_tf.location.z += 0.1
+            orig_found = bp_lib.filter(orig_bp_ids[i])
+            orig_actor = world.try_spawn_actor(orig_found[0], clean_tf) if orig_found else None
+            if orig_actor is not None:
+                orig_actor.set_simulate_physics(True)
+                restored += 1
+                survivors.append(orig_actor)
+
+    logger.info(f"[{scene_id}] orange swap: {swapped}/{n_swap} replaced "
+                f"({restored} restored, {len(survivors)} total).")
+    
+    return survivors
+
 
 def _spawn_track_with_valid_centerline(client, scene_meta, zone, lobes_range,
                                        ground_z, repo_root, logger, scene_id,
@@ -201,6 +274,14 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
             logger,
             scene_id,
         )
+
+        orange_ratio = cfg.get("cones", {}).get("orange_swap_ratio", 0.0)
+        if orange_ratio > 0:
+            cone_actors = _swap_random_cones_to_orange(
+                world, client, cone_actors, orange_ratio,
+                seed=scene_meta.get("track_seed"),
+                logger=logger, scene_id=scene_id)
+
         # Spawn ego at first waypoint, facing the path, at ground height.
         bp = world.get_blueprint_library().find(cfg["ego"]["blueprint"])
         first = waypoints[0]
