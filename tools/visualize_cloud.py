@@ -4,7 +4,7 @@ import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 
 # 1. Carica il binario di CARLA (X, Y, Z, Intensity)
-bin_file_path = "./../dataset/scenes/scene_0000/lidar/frame_000007.bin"
+bin_file_path = "./../beta_dataset/scenes/scene_0000/lidar/frame_000000.bin"
 points = np.fromfile(bin_file_path, dtype=np.float32).reshape((-1, 4))[:, 0:3]
 
 pcd = o3d.geometry.PointCloud()
