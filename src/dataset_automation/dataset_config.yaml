@@ -137,4 +137,4 @@ conditions:
     lidar_noise: 0.009
 
 output:
-  dataset_dir: "../../carla_dataset_branches"
+  dataset_dir: "../../carla_dataset_three_classses"
