@@ -8,7 +8,7 @@ import numpy as np
 
 from pcdet.datasets.dataset import DatasetTemplate
 
-CLASS_MAP = {'blue': 'blue', 'yellow': 'yellow'}
+CLASS_MAP = {'blue': 'blue', 'yellow': 'yellow', 'orange_small': 'orange_small'}
 
 class ConeDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None):
