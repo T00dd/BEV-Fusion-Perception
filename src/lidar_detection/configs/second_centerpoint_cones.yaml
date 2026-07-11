@@ -1,10 +1,13 @@
 # config file for custom SECOND + CenterPoint backbone for LiDAR branch
 # inherits params from cone_dataset.yaml
 
-CLASS_NAMES: ['blue', 'yellow']
+CLASS_NAMES: ['blue', 'yellow', 'orange_small']
+
+USE_WANDB: True
 
 DATA_CONFIG:
   _BASE_CONFIG_: src/lidar_detection/configs/cone_dataset.yaml
+  MODULE_NAME: lidar_detection.datasets
 
 MODEL:
   NAME: CenterPoint
@@ -33,7 +36,7 @@ MODEL:
       CLASS_AGNOSTIC: False
 
       CLASS_NAMES_EACH_HEAD: [
-        ['blue', 'yellow']
+        ['blue', 'yellow', 'orange_small'],
       ]
 
       SHARED_CONV_CHANNEL: 64
@@ -94,7 +97,7 @@ MODEL:
       NMS_POST_MAXSIZE: 500
 
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 4  # depends on GPU resources
+    BATCH_SIZE_PER_GPU: 24  # depends on GPU resources
     NUM_EPOCHS: 80   # starting point, to be refined
     OPTIMIZER: adam_onecycle
     LR: 0.003
