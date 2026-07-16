@@ -1,95 +1,124 @@
-import os
+import argparse
 import pickle
-import numpy as np
-import copy
 from pathlib import Path
+
+import numpy as np
+
 from pcdet.config import cfg, cfg_from_yaml_file
 from pcdet.utils import common_utils
-import lidar_detection.datasets
+from lidar_detection.datasets.dataset_adapter import ConeDataset
 
-def generate_infos(config_path):
-    cfg_from_yaml_file(config_path, cfg)
-    dataset_cfg = cfg.DATA_CONFIG
-    root_path = Path(dataset_cfg.DATA_PATH)
-    
-    print(f"-> Initializing database generation for path: {root_path}")
-    
-    for split in ['train', 'val']:
-        current_dataset_cfg = copy.deepcopy(dataset_cfg)
-        
-        if hasattr(current_dataset_cfg, 'DATA_AUGMENTOR') and current_dataset_cfg.DATA_AUGMENTOR is not None:
-            current_dataset_cfg.DATA_AUGMENTOR.DISABLE_AUG_LIST = ['gt_sampling', 'placeholder']
-        
-        from lidar_detection.datasets.dataset_adapter import ConeDataset
-        dataset = ConeDataset(
-            dataset_cfg=current_dataset_cfg,
-            class_names=cfg.CLASS_NAMES,
-            training=False,
-            root_path=root_path,
-            logger=common_utils.create_logger()
-        )
-        
-        dataset.split = split
-        dataset.sample_list = dataset._build_sample_list()
-        
-        print(f"\n[Processing split: {split}] Found {len(dataset)} frames.")
-        infos_list = []
-        
-        db_infos = {}
-        for c in cfg.CLASS_NAMES:
-            db_infos[c] = []
-            
-        for idx in range(len(dataset)):
-            scene, frame_name = dataset.sample_list[idx]
-            points = dataset.get_lidar(scene, frame_name)
-            gt_boxes, gt_names, num_pts = dataset.get_label(scene, frame_name)
-            
-            info = {
-                'point_cloud': {
-                    'num_features': dataset.num_point_features,
-                    'lidar_idx': f"{scene}_{frame_name}"
-                },
+
+def points_in_box(points, box):
+    """Maschera dei punti dentro la box [x,y,z,dx,dy,dz,heading]. heading=0 -> assi-allineata."""
+    cx, cy, cz, dx, dy, dz, yaw = box
+    q = points[:, :3] - np.array([cx, cy, cz], dtype=np.float32)
+    if abs(yaw) > 1e-6:                       # robustezza, ma per i coni yaw=0
+        c, s = np.cos(-yaw), np.sin(-yaw)
+        q = q @ np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32).T
+    return ((np.abs(q[:, 0]) <= dx / 2) &
+            (np.abs(q[:, 1]) <= dy / 2) &
+            (np.abs(q[:, 2]) <= dz / 2))
+
+
+def list_frames(root, split):
+    split_file = root / 'splits' / f'{split}.txt'
+    scenes = [ln.strip() for ln in open(split_file) if ln.strip()]
+    frames = []
+    for sc in scenes:
+        ld = root / 'scenes' / sc / 'lidar'
+        if ld.exists():
+            frames += [(sc, p.stem) for p in sorted(ld.glob('*.bin'))]
+    return frames
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--cfg', required=True)
+    args = ap.parse_args()
+
+    cfg_from_yaml_file(args.cfg, cfg)
+    root = Path(cfg.DATA_CONFIG.DATA_PATH)
+    class_names = list(cfg.CLASS_NAMES)
+    logger = common_utils.create_logger()
+
+    # training=False -> NON costruisce il data_augmentor, quindi NON tenta di
+    # caricare il database (che stiamo generando ora): niente dipendenza circolare.
+    dataset = ConeDataset(dataset_cfg=cfg.DATA_CONFIG, class_names=class_names,
+                          training=False, root_path=root, logger=logger)
+    nfeat = dataset.num_point_features
+    print(f'-> feature per punto: {nfeat} | classi: {class_names}')
+
+    db_dir = root / 'gt_database'
+    db_dir.mkdir(exist_ok=True)
+    db_infos = {c: [] for c in class_names}
+
+    for split in ['train', 'val', 'test']:
+        frames = list_frames(root, split)
+        print(f'\n[{split}] {len(frames)} frame')
+        infos = []
+
+        for k, (scene, frame) in enumerate(frames):
+            points = dataset.get_lidar(scene, frame)
+            gt_boxes, gt_names, gt_npts = dataset.get_label(scene, frame)
+
+            infos.append({
+                'point_cloud': {'num_features': nfeat, 'lidar_idx': f'{scene}_{frame}'},
                 'annos': {
                     'gt_boxes_lidar': gt_boxes,
                     'name': gt_names,
-                    'difficulty': np.zeros(len(gt_boxes), dtype=np.int32)
-                }
-            }
-            infos_list.append(info)
-            
-            if split == 'train' and len(gt_boxes) > 0:
-                for i, (box, name, n_pts) in enumerate(zip(gt_boxes, gt_names, num_pts)):
-                    min_pts_required = dataset_cfg.DATA_AUGMENTOR.AUG_CONFIG_LIST[0].PREPARE.filter_by_min_points
-                    limit = 1
-                    for rule in min_pts_required:
-                        if rule.startswith(name):
-                            limit = int(rule.split(':')[1])
-                    
-                    if n_pts >= limit:
-                        db_info = {
-                            'name': name,
-                            'box3d_lidar': box,
-                            'num_points_in_gt': n_pts,
-                            'sample_idx': f"{scene}_{frame_name}",
-                            'path': f"scenes/{scene}/lidar/{frame_name}.bin"
-                        }
-                        db_infos[name].append(db_info)
-            
-            if (idx + 1) % 500 == 0 or (idx + 1) == len(dataset):
-                print(f"   Progress: {idx + 1}/{len(dataset)} frames parsed...")
+                    'num_points_in_gt': gt_npts,
+                    'difficulty': np.zeros(len(gt_boxes), np.int32),
+                },
+            })
 
-        out_pkl = root_path / f"cone_infos_{split}.pkl"
-        with open(out_pkl, 'wb') as f:
-            pickle.dump(infos_list, f)
-        print(f"-> Info file saved successfully: {out_pkl}")
-        
-        if split == 'train':
-            out_db_pkl = root_path / "cone_dbinfos_train.pkl"
-            with open(out_db_pkl, 'wb') as f:
-                pickle.dump(db_infos, f)
-            print(f"-> Ground truth sampling database saved successfully: {out_db_pkl}")
-            for c in cfg.CLASS_NAMES:
-                print(f"   Class [{c}]: {len(db_infos[c])} valid objects injected into the database.")
+            # database SOLO dal train
+            if split == 'train':
+                for i, (box, name) in enumerate(zip(gt_boxes, gt_names)):
+                    if name not in db_infos:
+                        continue
+                    mask = points_in_box(points, box)
+                    obj = points[mask].copy()
+                    if len(obj) == 0:                 # niente punti -> niente da incollare
+                        continue
+                    obj[:, :3] -= box[:3]             # centra sull'origine (convenzione OpenPCDet)
 
-if __name__ == "__main__":
-    generate_infos("src/lidar_detection/configs/second_centerpoint_cones.yaml")
+                    fname = f'{scene}_{frame}_{name}_{i}.bin'
+                    obj.astype(np.float32).tofile(db_dir / fname)
+                    db_infos[name].append({
+                        'name': name,
+                        'path': f'gt_database/{fname}',   # relativo a DATA_PATH
+                        'gt_idx': i,
+                        'box3d_lidar': box.astype(np.float32),
+                        'num_points_in_gt': int(len(obj)),
+                        'sample_idx': f'{scene}_{frame}',
+                        'num_point_features': nfeat,
+                        'difficulty': 0,
+                    })
+
+            if (k + 1) % 1000 == 0 or (k + 1) == len(frames):
+                print(f'   {k + 1}/{len(frames)}')
+
+        with open(root / f'cone_infos_{split}.pkl', 'wb') as f:
+            pickle.dump(infos, f)
+        print(f'-> salvato cone_infos_{split}.pkl')
+
+    with open(root / 'cone_dbinfos_train.pkl', 'wb') as f:
+        pickle.dump(db_infos, f)
+    print('\n-> salvato cone_dbinfos_train.pkl')
+
+    # riepilogo: quanti coni nel db, e quanti superano la soglia filter_by_min_points
+    prepare = cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0].PREPARE.filter_by_min_points
+    thr = {}
+    for rule in prepare:
+        c, v = rule.rsplit(':', 1); thr[c] = int(v)
+    print('\nRiepilogo database (soglia filter_by_min_points tra parentesi):')
+    for c in class_names:
+        n_pts = np.array([d['num_points_in_gt'] for d in db_infos[c]])
+        n_pass = int((n_pts >= thr.get(c, 1)).sum()) if len(n_pts) else 0
+        print(f'   {c:14s}: {len(db_infos[c]):6d} coni totali | '
+              f'{n_pass:6d} superano soglia {thr.get(c, 1)}')
+
+
+if __name__ == '__main__':
+    main()
