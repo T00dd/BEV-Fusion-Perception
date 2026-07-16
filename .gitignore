@@ -2,3 +2,14 @@ __pycache__/
 .vscode/
 data/
 build/
+carla_dataset_three_classses/
+*.pkl
+**/gt_database/
+output/
+wandb/
+eval_report/
+robustness*/
+*.pth/
+*.png
+*.pdf
+diag_out_0a/
