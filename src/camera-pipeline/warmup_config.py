@@ -26,8 +26,8 @@ class WarmupConfig:
 
     feature_index: int = 1  #feature map a stride 4
     
-    #numero di classi per la detection 2d: blu, giallo
-    num_classes: int = 2
+    #numero di classi per la detection 2d: blu, giallo, arancione
+    num_classes: int = 3
     
     #head di detection 2d
     head_hidden_channels: int = 64

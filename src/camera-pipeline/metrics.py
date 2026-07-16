@@ -74,7 +74,7 @@ def match_detections_to_gt(
     #asxocia detections a coni nel gt usando una soglia minima di distanza
     #restituisce TP, FP, FN
 
-    color_to_class = {"blue": 0, "yellow" : 1}
+    color_to_class = {"blue": 0, "yellow" : 1, "orange": 2}
 
     gt_items = []
 
@@ -156,7 +156,7 @@ def compute_metrics(
 
     #stratificazione per distanza
 
-    areas = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 100)]
+    areas = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 50)]
     for lo, hi in areas:
         tp_in_bin = sum(1 for d in all_tp if lo <= d.get("gt_depth_m", -1) < hi)
         fn_in_bin = sum(1 for d in all_fn if lo <= d.get("depth_m", -1) < hi)

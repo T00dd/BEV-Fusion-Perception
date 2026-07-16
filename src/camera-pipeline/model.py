@@ -15,7 +15,7 @@ class DetectionHead2d(nn.Module):
         self,
         in_channels: int,
         hidden_channels: int,
-        num_classes: int = 2,
+        num_classes: int = 3,
         numlayers: int = 3,
     ):
         super().__init__()

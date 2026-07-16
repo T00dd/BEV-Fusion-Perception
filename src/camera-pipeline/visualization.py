@@ -20,7 +20,9 @@ def denormalize_image(image_tensor: torch.Tensor) -> np.ndarray:
     return img
 
 
-def color_heatmap(heatmap: np.ndarray, num_classes: int = 2) -> np.ndarray:
+def color_heatmap(heatmap: np.ndarray) -> np.ndarray:
+
+    num_classes = heatmap.shape[0]
 
     #converte una heatmap in un immagine rgb
 
@@ -31,6 +33,9 @@ def color_heatmap(heatmap: np.ndarray, num_classes: int = 2) -> np.ndarray:
     if num_classes >= 2:
         rgb[..., 0] = heatmap[1]  # rosso (giallo = rosso + verde)
         rgb[..., 1] = heatmap[1]  # verde
+    if num_classes >= 3:
+        rgb[..., 0] = np.maximum(rgb[..., 0], heatmap[2])  # rosso (arancione = rosso + verde)
+        rgb[..., 1] = np.maximum(rgb[..., 1], heatmap[2])  # verde
     rgb = np.clip(rgb * 255, 0, 255).astype(np.uint8)
     return rgb
 
