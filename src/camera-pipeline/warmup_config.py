@@ -18,8 +18,12 @@ class WarmupConfig:
     #heatmap 2d gt
     #HRNet-W32 branch ad alta risoluzione a stride 4
     heatmap_stride: int = 4
-    #sigma della gaussiana per generare i picchi nella heatmap (unita' di feature map)
+    
+    #sigma adattivo della gaussiana per generare i picchi nella heatmap (unita' di feature map)
     gaussian_sigma: float = 2.0
+    sigma_ref_depth_m: float = 10.0   # a questa distanza sigma == gaussian_sigma
+    sigma_min: float = 0.8            # coni lontani: picco stretto
+    sigma_max: float = 4.0            # coni vicini: picco ampio
     
     #modello
     backbone_name: str = "hrnet_w32.ms_in1k"

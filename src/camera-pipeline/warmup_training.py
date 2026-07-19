@@ -44,6 +44,9 @@ def build_dataloaders(cfg: WarmupConfig):
         heatmap_stride=cfg.heatmap_stride,
         num_classes=cfg.num_classes,
         gaussian_sigma=cfg.gaussian_sigma,
+        sigma_ref_depth_m=cfg.sigma_ref_depth_m,
+        sigma_min=cfg.sigma_min,
+        sigma_max=cfg.sigma_max,
         augment=True,
         color_jitter_params=color_jitter_params,
         gaussian_noise_std=cfg.gaussian_noise_std,
@@ -55,6 +58,9 @@ def build_dataloaders(cfg: WarmupConfig):
         heatmap_stride=cfg.heatmap_stride,
         num_classes=cfg.num_classes,
         gaussian_sigma=cfg.gaussian_sigma,
+        sigma_ref_depth_m=cfg.sigma_ref_depth_m,
+        sigma_min=cfg.sigma_min,
+        sigma_max=cfg.sigma_max,
         augment=False,
     )
     

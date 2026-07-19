@@ -25,17 +25,33 @@ def gaussian_2d(shape: tuple[int, int], center: tuple[float, float], sigma: floa
     return gauss
 
 
+def adaptive_sigma(
+        depth_m: float,
+        base_sigma: float,
+        ref_depth_m: float,
+        sigma_min: float,
+        sigma_max: float,
+) -> float:
+    if depth_m is None or depth_m <= 0.0:
+        return base_sigma
+    sigma = base_sigma * (ref_depth_m/depth_m)
+    return float(np.clip(sigma, sigma_min, sigma_max))
+
+
 def generate_heatmap_offset_mask(
     cones: List[Dict],
     image_size: Tuple[int, int],
     stride: int,
     num_classes: int,
-    sigma: float,
+    base_sigma: float,
+    sigma_ref_depth_m: float,
+    sigma_min: float,
+    sigma_max: float,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     
-    #genera heatmap gaussiana, offset e offset mask per il calcolo della loss
+    #genera heatmap gaussiana adattiva, offset e offset mask per il calcolo della loss
 
-    #heatmap: gaaussiana in corrispondenza dei centri dei coni
+    #heatmap: gaussiana in corrispondenza dei centri dei coni
     #offset: vettore di offset per recuperare precisione sul centro esatto del cono
     #offset_mask: maschera per calcolare la loss solo in corrispondenza dei centri dei coni
 
@@ -79,8 +95,12 @@ def generate_heatmap_offset_mask(
             continue
 
         #genera gaussiana 2d centrata sul cono
-        gauss = gaussian_2d((H_feat, W_feat), (cx_feat, cy_feat), sigma)
+        sigma = adaptive_sigma(
+            cone.get("depth_m", -1.0),
+            base_sigma, sigma_ref_depth_m, sigma_min, sigma_max,
+        )
 
+        gauss = gaussian_2d((H_feat, W_feat), (cx_feat, cy_feat), sigma)
         gauss[cy_feat_int, cx_feat_int] = 1.0
         heatmap[class_idx] = np.maximum(heatmap[class_idx], gauss)
 
@@ -101,6 +121,9 @@ class WarmupDataset(Dataset):
         heatmap_stride: int = 4,
         num_classes: int = 2,
         gaussian_sigma: float = 2.0,
+        sigma_ref_depth_m: float = 10.0,
+        sigma_min: float = 0.8,
+        sigma_max: float = 4.0,
         augment: bool = False,
         precomputed_heatmaps: bool = False,
 
@@ -114,6 +137,9 @@ class WarmupDataset(Dataset):
         self.heatmap_stride = heatmap_stride
         self.num_classes = num_classes
         self.gaussian_sigma = gaussian_sigma
+        self.sigma_ref_depth_m = sigma_ref_depth_m
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
         self.augment = augment
         self.precomputed_heatmaps = precomputed_heatmaps
 
@@ -194,6 +220,9 @@ class WarmupDataset(Dataset):
                 self.heatmap_stride,
                 self.num_classes,
                 self.gaussian_sigma,
+                self.sigma_ref_depth_m,
+                self.sigma_min,
+                self.sigma_max,
             )
         else:
             #genera tutto dal JSON
