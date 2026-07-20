@@ -58,8 +58,6 @@ def generate_heatmap_offset_mask(
     H, W = image_size
     H_feat, W_feat = H // stride, W // stride
 
-    max_depth = 50.0
-
     heatmap = np.zeros((num_classes, H_feat, W_feat), dtype=np.float32)
     offset = np.zeros((2, H_feat, W_feat), dtype=np.float32)
     offset_mask = np.zeros((H_feat, W_feat), dtype=np.float32)
@@ -105,8 +103,9 @@ def generate_heatmap_offset_mask(
         heatmap[class_idx] = np.maximum(heatmap[class_idx], gauss)
 
         #crea offset e offset mask
-        offset[0, cy_feat_int, cx_feat_int] = cx_feat - cx_feat_int
-        offset[1, cy_feat_int, cx_feat_int] = cy_feat - cy_feat_int
+        
+        offset[0, cy_feat_int, cx_feat_int] = cy_feat - cy_feat_int
+        offset[1, cy_feat_int, cx_feat_int] = cx_feat - cx_feat_int
         offset_mask[cy_feat_int, cx_feat_int] = 1.0
 
     return heatmap, offset, offset_mask
@@ -235,6 +234,9 @@ class WarmupDataset(Dataset):
                 self.heatmap_stride,
                 self.num_classes,
                 self.gaussian_sigma,
+                self.sigma_ref_depth_m,
+                self.sigma_min,
+                self.sigma_max,
             )
 
 
