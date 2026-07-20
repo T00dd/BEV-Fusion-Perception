@@ -115,7 +115,7 @@ def plot_training_results(step_csv, epoch_csv, output_dir="plots"):
         ('val_recall_5-10m', '5-10m', 'tab:blue'),
         ('val_recall_10-15m', '10-15m', 'tab:purple'),
         ('val_recall_15-20m', '15-20m', 'tab:orange'),
-        ('val_recall_20-100m', '20-100m', 'tab:red')
+        ('val_recall_20-50m', '20-50m', 'tab:red')
     ]
     
     # Controlliamo che almeno la prima colonna esista per evitare crash
