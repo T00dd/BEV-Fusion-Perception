@@ -1,22 +1,3 @@
-"""
-evaluate.py -- valutazione GEOMETRICA del rilevatore di coni class-agnostic.
-
-Fa TRE cose in un colpo:
-  1) REPORT testuale: separa CAPACITA' della rete (coni rilevabili, ignore-region) da
-     COPERTURA del sensore (quanti coni sono davvero rilevabili).
-  2) FIGURE da tesi: heatmap BEV di recall, recall distanza x punti, curva di
-     detectabilita', copertura-vs-capacita', scene BEV facile/difficile.
-  3) PERSISTENZA: salva TUTTE le metriche in un file cumulativo (JSON + CSV riepilogo),
-     etichettate per configurazione (--run_name) e soglia punti (--min_gt_points), cosi'
-     confronti facilmente le varie run (es. agnostic_nogts vs gtsampling vs minpts2).
-
-USO
----
-  python evaluate.py --dump val_predictions.pkl --run_name agnostic_nogts --min_gt_points 3
-  python evaluate.py --dump val_predictions.pkl --run_name agnostic_gtsampling --min_gt_points 3
-  python evaluate.py --dump val_predictions.pkl --run_name agnostic_nogts --min_gt_points 2
-  # -> tutte le metriche si accumulano in results/eval_results.json + eval_summary.csv
-"""
 import argparse
 import csv
 import datetime
@@ -25,6 +6,13 @@ import pickle
 from pathlib import Path
 
 import matplotlib
+
+matplotlib.rcParams.update({
+       'font.family': 'serif',
+       'mathtext.fontset': 'cm',  
+       'font.size': 11,
+})
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,8 +20,8 @@ import numpy as np
 DIST_BANDS = [(0, 15), (15, 30), (30, 50)]
 NPTS_BUCKETS = [(0, 0), (1, 2), (3, 5), (6, 10), (11, 20), (21, 10 ** 9)]
 NPTS_LABELS = ['0', '1-2', '3-5', '6-10', '11-20', '21+']
-PC_RANGE = (0, -25, 50, 25)          # xmin, ymin, xmax, ymax
-BEV_EXTENT = (0, 50, -25, 25)        # x_min, x_max, y_min, y_max per le figure
+PC_RANGE = (0, -25, 50, 25)   
+BEV_EXTENT = (0, 50, -25, 25)       
 MIN_POINTS_TRAIN = 3
 
 
@@ -52,10 +40,6 @@ def jsonable(x):
         return None
     return x
 
-
-# --------------------------------------------------------------------------- #
-# validita' + matching ignore-aware (per la CAPACITA')
-# --------------------------------------------------------------------------- #
 def in_range(xy, r):
     if len(xy) == 0:
         return np.zeros(0, bool)
@@ -165,10 +149,6 @@ def collect_operating(frames, thr, score_thr):
                           'fp': int((cons & ~is_tp & ~ign).sum())})
     return dict(tp=tp, fp=fp, missed=missed, n_gt=n_gt, per_frame=per_frame)
 
-
-# --------------------------------------------------------------------------- #
-# matching FULL-GT (senza ignore) per le FIGURE (donut / copertura / detectability)
-# --------------------------------------------------------------------------- #
 def match_full(frames, dist_thr, score_thr):
     gx, gy, gn, gdet = [], [], [], []
     for fr in frames:
@@ -195,10 +175,6 @@ def recall_by(vals_det, vals_all, buckets, labels):
         rows.append([lab, det, tot, det / tot if tot else float('nan')])
     return rows
 
-
-# --------------------------------------------------------------------------- #
-# FIGURE
-# --------------------------------------------------------------------------- #
 def fig_bev_recall(gx, gy, gdet, out, cell=2.5, min_count=8):
     xe = np.arange(BEV_EXTENT[0], BEV_EXTENT[1] + cell, cell)
     ye = np.arange(BEV_EXTENT[2], BEV_EXTENT[3] + cell, cell)
@@ -231,15 +207,15 @@ def fig_dist_npts(gx, gy, gn, gdet, out):
     fig, ax = plt.subplots(figsize=(6.5, 5.5)); im = ax.imshow(Rm, cmap='RdYlGn', vmin=0, vmax=1, aspect='auto')
     ax.set_xticks(range(len(DIST_BANDS))); ax.set_xticklabels([f'{a}-{b}m' for a, b in DIST_BANDS])
     ax.set_yticks(range(len(NPTS_LABELS))); ax.set_yticklabels(NPTS_LABELS)
-    ax.set_xlabel('distanza'); ax.set_ylabel('punti sul cono')
-    ax.set_title('Recall per distanza x densita\' di punti', fontweight='bold')
+    ax.set_xlabel('range band'); ax.set_ylabel('points per cone')
+    
     for i in range(Rm.shape[0]):
         for j in range(Rm.shape[1]):
             if not np.isnan(Rm[i, j]):
                 ax.text(j, i, f'{Rm[i,j]:.2f}\nn={int(Nm[i,j])}', ha='center', va='center',
                         fontsize=8, color='black' if Rm[i, j] > .4 else 'white')
     fig.colorbar(im, fraction=0.046, pad=0.04, label='recall'); fig.tight_layout()
-    fig.savefig(out, dpi=140); plt.close(fig)
+    fig.savefig(out.with_suffix('.pdf'), bbox_inches='tight')
 
 
 def fig_detectability(gn, gdet, out):
@@ -327,11 +303,6 @@ def plot_pr(rec, prec, path):
     fig.tight_layout(); fig.savefig(path, dpi=130); plt.close(fig)
 
 
-# --------------------------------------------------------------------------- #
-# CONFIDENZA & CALIBRAZIONE
-# Sfrutta il fatto che le predizioni sono raccolte con score_thresh basso (0.01):
-# abbiamo l'intero spettro di score per valutare quanto lo score sia affidabile.
-# --------------------------------------------------------------------------- #
 def _rankdata(a):
     """Ranghi medi (gestione ties) senza scipy."""
     order = np.argsort(a, kind='mergesort'); sa = a[order]
@@ -346,9 +317,8 @@ def _rankdata(a):
 
 
 def confidence_metrics(frames, dist_thr, n_bins=10):
-    """Match su TUTTE le predizioni (ignore-aware). Ritorna separazione TP/FP,
-    reliability/ECE e score mediano per difficolta' (distanza / densita' punti)."""
-    tp_s, fp_s, tp_rec = [], [], []   # tp_rec: (score, dist, npts)
+
+    tp_s, fp_s, tp_rec = [], [], []
     for fr in frames:
         pb, ps, gb, gnp, gv = fr['pred_boxes'], fr['pred_scores'], fr['gt_boxes'], fr['gt_npts'], fr['gt_valid']
         order = np.argsort(-ps); taken = np.zeros(len(gb), bool)
@@ -362,18 +332,15 @@ def confidence_metrics(frames, dist_thr, n_bins=10):
                 if gv[j]:
                     tp_s.append(float(ps[pi]))
                     tp_rec.append((float(ps[pi]), float(np.hypot(*gb[j, :2])), int(gnp[j])))
-                # matched a GT non valido -> ignore
             else:
                 fp_s.append(float(ps[pi]))
     tp = np.array(tp_s); fp = np.array(fp_s)
 
-    # AUROC: P(score TP > score FP). 0.5 = score inutile, 1 = separazione perfetta.
     auroc = None
     if len(tp) and len(fp):
         r = _rankdata(np.concatenate([tp, fp]))
         auroc = float((r[:len(tp)].sum() - len(tp) * (len(tp) + 1) / 2) / (len(tp) * len(fp)))
 
-    # reliability diagram + ECE
     y = np.concatenate([np.ones(len(tp)), np.zeros(len(fp))])
     conf = np.concatenate([tp, fp]); N = len(conf)
     edges = np.linspace(0, 1, n_bins + 1); rel = []; ece = 0.0
@@ -385,7 +352,6 @@ def confidence_metrics(frames, dist_thr, n_bins=10):
             rel.append({'bin_lo': float(lo), 'bin_hi': float(hi), 'count': c, 'confidence': cf, 'accuracy': acc})
             ece += c / max(N, 1) * abs(acc - cf)
 
-    # score mediano per difficolta' (solo TP)
     recs = np.array(tp_rec) if tp_rec else np.zeros((0, 3))
 
     def med_dist():
@@ -431,10 +397,6 @@ def plot_reliability(rel, ece, path):
     ax.set_title(f'Reliability diagram (ECE={ece:.3f})', fontweight='bold'); ax.legend(); ax.grid(alpha=.2)
     fig.tight_layout(); fig.savefig(path, dpi=130); plt.close(fig)
 
-
-# --------------------------------------------------------------------------- #
-# persistenza cumulativa
-# --------------------------------------------------------------------------- #
 SUMMARY_COLS = ['run_name', 'min_gt_points', 'dist_thresh', 'op_score', 'n_frames',
                 'coverage_pct', 'ap_global', 'ap_0_15m', 'ap_15_30m', 'ap_30_50m',
                 'recall', 'precision', 'fp_per_frame', 'loc_err_median_cm', 'loc_err_p90_cm',
@@ -450,7 +412,6 @@ def save_results(results_file, key, metrics):
     db = json.load(open(results_file)) if results_file.exists() else {}
     db[key] = metrics
     json.dump(jsonable(db), open(results_file, 'w'), indent=2, ensure_ascii=False)
-    # CSV riepilogo (una riga per configurazione)
     csv_path = results_file.with_name('eval_summary.csv')
     with open(csv_path, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=SUMMARY_COLS); w.writeheader()
@@ -475,8 +436,6 @@ def save_results(results_file, key, metrics):
             })
     return results_file, csv_path
 
-
-# --------------------------------------------------------------------------- #
 def main():
     ap_ = argparse.ArgumentParser()
     ap_.add_argument('--dump', required=True)
@@ -502,7 +461,6 @@ def main():
         fr['gt_npts'] = np.asarray(fr['gt_npts'], int)
         fr['gt_valid'] = valid_mask(fr['gt_boxes'], fr['gt_npts'], args.min_gt_points, PC_RANGE)
 
-    # coverage
     all_np = np.concatenate([f['gt_npts'] for f in frames]); all_xy = np.concatenate([f['gt_boxes'][:, :2] for f in frames])
     all_valid = np.concatenate([f['gt_valid'] for f in frames]); inr = in_range(all_xy, PC_RANGE)
     tot, n_inr, n_valid = len(all_np), int(inr.sum()), int(all_valid.sum())
@@ -517,11 +475,9 @@ def main():
         cov_by_band[f'{a}-{b}m'] = cov
         print(f'      {a:>2}-{b:<3}m: {int(all_valid[m].sum())}/{int(m.sum())}  copertura={cov:.3f}')
 
-    # AP capacita'
     ap_glob = ap(frames, T); ap_band = {f'{a}-{b}m': ap(frames, T, (a, b)) for a, b in DIST_BANDS}
     print(f'\n[1] AP capacita\' globale {ap_glob:.3f} | ' + ' '.join(f'{k}={v:.3f}' for k, v in ap_band.items()))
 
-    # punto operativo
     s, rec, prec, f1, ngt = pr_curve(frames, T)
     op = args.score_thresh if args.score_thresh is not None else (float(s[int(np.argmax(f1))]) if len(f1) else 0.15)
     print(f'\n[2] Punto operativo score>={op:.3f}')
@@ -538,7 +494,6 @@ def main():
     print(f"      TP={len(tp)} FP={len(fp)} MISSED={len(missed)} recall={recall:.3f} "
           f"precisione={precision:.3f} FP/frame={fp_pf:.2f}")
 
-    # figure (match full-gt al punto operativo)
     gx, gy, gn, gdet = match_full(frames, T, op)
     fig_bev_recall(gx, gy, gdet, out_dir / 'bev_recall_heatmap.png')
     fig_dist_npts(gx, gy, gn, gdet, out_dir / 'recall_dist_npts.png')
@@ -546,7 +501,6 @@ def main():
     fig_coverage_capability(gx, gy, gn, gdet, out_dir / 'coverage_vs_capability.png')
     plot_pr(rec, prec, out_dir / 'precision_recall.png')
 
-    # recall per distanza (capacita') + detectability (full)
     td = np.array([t['dist'] for t in tp]); md = np.array([m['dist'] for m in missed])
     rows_dist = recall_by(td, np.concatenate([td, md]) if len(td) + len(md) else np.zeros(0),
                           DIST_BANDS, [f'{a}-{b}m' for a, b in DIST_BANDS])
@@ -556,7 +510,6 @@ def main():
     bar(NPTS_LABELS, [r[3] for r in rows_npts], 'Detectability per densita\' punti (tutti i GT)',
         'recall', out_dir / 'recall_by_npoints.png', counts=[r[2] for r in rows_npts])
 
-    # errore di localizzazione
     loc = {}
     if tp:
         err = np.array([t['err'] for t in tp]); rad = np.array([t['radial'] for t in tp])
@@ -574,7 +527,6 @@ def main():
     fp_by_band = {f'{a}-{b}m': int(((fp_d >= a) & (fp_d < b)).sum()) for a, b in DIST_BANDS}
     worst = sorted([p for p in R['per_frame'] if p['n_gt'] >= 5], key=lambda p: p['recall'])[:10]
 
-    # ---------- confidenza & calibrazione ----------
     conf = confidence_metrics(frames, T)
     plot_score_calib(conf.pop('_tp'), conf.pop('_fp'), out_dir / 'score_calibration.png')
     plot_reliability(conf['reliability'], conf['ece'], out_dir / 'reliability_diagram.png')
@@ -584,7 +536,6 @@ def main():
           f"      ECE {conf['ece']:.3f}")
     print(f"      score mediano TP per distanza: {conf['score_by_distance']}")
 
-    # ---------- costruzione metriche + salvataggio ----------
     metrics = {
         'run_name': args.run_name, 'min_gt_points': args.min_gt_points, 'dist_thresh': T,
         'n_frames': len(frames), 'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
