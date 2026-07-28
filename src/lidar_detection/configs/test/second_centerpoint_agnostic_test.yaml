@@ -3,7 +3,7 @@ CLASS_NAMES: ['cone']
 USE_WANDB: True
 
 DATA_CONFIG:
-  _BASE_CONFIG_: src/lidar_detection/configs/cone_dataset_agnostic_test.yaml
+  _BASE_CONFIG_: src/lidar_detection/configs/test/cone_dataset_agnostic_test.yaml
   MODULE_NAME: lidar_detection.datasets
 
 MODEL:
