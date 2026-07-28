@@ -14,3 +14,8 @@ robustness*/
 *.pdf
 diag_out_0a/
 results/
+*.npy
+*.txt
+intensity_cache/
+dataset_analysis/
+dataset_stats/
