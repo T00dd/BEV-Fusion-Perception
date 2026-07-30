@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 [submodule "lib/track-generator"]
 	path = lib/track-generator
 	url = https://github.com/eagletrt/track-generator-sw
@@ -8,3 +9,8 @@
 [submodule "lib/OpenPCDet"]
 	path = lib/OpenPCDet
 	url = https://github.com/open-mmlab/OpenPCDet.git
+=======
+[submodule "lib/OpenPCDet"]
+	path = lib/OpenPCDet
+	url = git@github.com:open-mmlab/OpenPCDet.git
+>>>>>>> feat/lidar-pipeline
