@@ -74,7 +74,12 @@ def match_detections_to_gt(
     #asxocia detections a coni nel gt usando una soglia minima di distanza
     #restituisce TP, FP, FN
 
-    color_to_class = {"blue": 0, "yellow" : 1, "orange": 2}
+    color_to_class = {
+        "blue": 0, 
+        "yellow" : 1, 
+        "orange_big": 2,
+        "orange_small": 2
+    }
 
     gt_items = []
 

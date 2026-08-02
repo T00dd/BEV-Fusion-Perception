@@ -65,7 +65,8 @@ def generate_heatmap_offset_mask(
     color_to_class = {
         "blue": 0,
         "yellow": 1,
-        "orange": 2,
+        "orange_big": 2,
+        "orange_small": 2
     }
 
     for cone in cones:
