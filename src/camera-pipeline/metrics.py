@@ -77,7 +77,6 @@ def match_detections_to_gt(
     color_to_class = {
         "blue": 0, 
         "yellow" : 1, 
-        "orange_big": 2,
         "orange_small": 2
     }
 
