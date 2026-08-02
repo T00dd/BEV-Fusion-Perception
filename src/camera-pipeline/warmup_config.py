@@ -6,7 +6,7 @@ from typing import Tuple
 @dataclass
 class WarmupConfig:
     #path
-    dataset_root: Path = Path("../../../dataset")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
+    dataset_root: Path = Path("../../carla_dataset_three_classses")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
     output_dir: Path = Path("./checkpoints/warmup")
     models_dir: Path = Path("../models")
     
@@ -48,12 +48,12 @@ class WarmupConfig:
     
     #training
     num_epochs: int = 30
-    batch_size: int = 8
+    batch_size: int = 32
     num_workers: int = 12
     
     #learning rate differenziato: basso sul backbone, alto sulla head
-    backbone_lr: float = 1e-5
-    head_lr: float = 3e-4
+    backbone_lr: float = 2e-5
+    head_lr: float = 6e-4
     weight_decay: float = 1e-4
     
     #scheduler
@@ -80,3 +80,9 @@ class WarmupConfig:
     
     def __post_init__(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+
+    #wandb for monitoring
+    use_wandb: bool = True
+    wandb_project: str = "HRNet-2D-Cone-Detection"
+    wandb_run_name: str = "warmup-run-01"
