@@ -1,6 +1,7 @@
 import random
 import sys
 import argparse
+import wandb
 
 from pathlib import Path
 import numpy as np
@@ -165,6 +166,14 @@ def train_one_epoch(
         #chiamiamo il logger
         logger.log_step(epoch, global_step, log_dict, lr_backbone, lr_head)
 
+        if cfg.use_wandb and global_step % cfg.log_every_n_steps == 0:
+            wandb.log({
+                "train/loss_total": log_dict["loss_total"],
+                "train/loss_focal": log_dict["loss_focal"],
+                "train/loss_offset": log_dict["loss_offset"],
+                "lr/backbone": lr_backbone
+            }, step=global_step)
+
         global_step += 1
 
     
@@ -283,6 +292,13 @@ def main():
     args = parser.parse_args()
 
     cfg = WarmupConfig()
+
+    if cfg.use_wandb:
+        wandb.init(
+            project=cfg.wandb_project,
+            name=cfg.wandb_run_name,
+            config=vars(cfg) if not isinstance(cfg, dict) else cfg
+        )
 
     if args.dataset_root:
         cfg.dataset_root = Path(args.dataset_root)
@@ -408,6 +424,9 @@ def main():
             epoch_summary = {f"train_{k}": v for k, v in train_losses.items()}
             epoch_summary.update(val_metrics)
             logger.log_epoch(epoch, epoch_summary)
+
+            if cfg.use_wandb:
+                wandb.log(epoch_summary, step=epoch)
             
             #salva il miglior modello in base a F1
             if val_metrics.get("val_f1", 0.0) > best_val_f1:
@@ -430,6 +449,9 @@ def main():
     print("\n[Done] Warm-up completato.")
     print(f"Best val F1: {best_val_f1:.4f}")
     print(f"Deliverable per script BEV: {cfg.output_dir}/backbone_only_best.pth")
+
+    if cfg.use_wandb:
+        wandb.finish()
  
  
 if __name__ == "__main__":

@@ -80,3 +80,9 @@ class WarmupConfig:
     
     def __post_init__(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+
+    #wandb for monitoring
+    use_wandb: bool = True
+    wandb_project: str = "HRNet-2D-Cone-Detection"
+    wandb_run_name: str = "warmup-run-01"
