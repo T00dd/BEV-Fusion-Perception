@@ -37,48 +37,17 @@ def grid_to_world(row, col, cfg):
     return x, y
  
 
-
-# def load_calib(calib_path: Path) -> Dict:
-#     #calib.yaml atteso:
-#     #  cam_left: {fx, fy, cx, cy, width, height}
-#     #  baseline: float (metri)
-#     with open(calib_path, "r") as f:
-#         data = yaml.safe_load(f)
-#     cam = data["cam_left"]
- 
-#     #se la baseline non viene trovata non si puo' calcolare la depth stereo
-#     if "baseline" in data:
-#         baseline = float(data["baseline"])
-#     elif "stereo" in data and "baseline_m" in data["stereo"]:
-#         baseline = float(data["stereo"]["baseline_m"])
-#     elif "T_cam_left_to_cam_right" in data:
-#         T_lr = np.array(data["T_cam_left_to_cam_right"], dtype=np.float32).reshape(4, 4)
-#         baseline = float(abs(T_lr[0, 3]))   # traslazione lungo x della camera
-#     else:
-#         raise KeyError(
-#             f"Baseline stereo non trovata in {calib_path}. Attesa una di: "
-#             f"'baseline', 'stereo.baseline_m', 'T_cam_left_to_cam_right'."
-#         )
- 
-#     return {
-#         "K": np.array([cam["fx"], cam["fy"], cam["cx"], cam["cy"]], dtype=np.float32),
-#         "calib_size": (int(cam["height"]), int(cam["width"])),
-#         "baseline": baseline,
-#         "T": np.array(data["T_cam_left_to_lidar"], dtype=np.float32).reshape(4, 4),
-#     }
-
 def load_calib(calib_path: Path) -> Dict:
     with open(calib_path, "r") as f:
         data = yaml.safe_load(f)
     
-    # Nel tuo calib.yaml i dati si trovano sotto 'cameras' -> 'left' e 'right'
     cams = data.get("cameras", {})
     if "left" not in cams:
         raise KeyError(f"Struttura non valida in {calib_path}: chiave 'cameras.left' mancante.")
         
     cam_left = cams["left"]
     
-    # Estrazione di fx, fy, cx, cy dalla matrice intrinsic_K 3x3
+    #estrazione di fx, fy, cx, cy dalla matrice intrinsic_K 3x3
     K_mat = cam_left["intrinsic_K"]
     fx = float(K_mat[0][0])
     fy = float(K_mat[1][1])
@@ -88,18 +57,16 @@ def load_calib(calib_path: Path) -> Dict:
     width = int(cam_left["width"])
     height = int(cam_left["height"])
     
-    # Calcolo del baseline stereo (distanza tra camera sinistra e destra lungo Y)
     if "right" in cams and "extrinsic_cam_from_ego_carla" in cams["left"] and "extrinsic_cam_from_ego_carla" in cams["right"]:
         T_left = np.array(cams["left"]["extrinsic_cam_from_ego_carla"], dtype=np.float32)
         T_right = np.array(cams["right"]["extrinsic_cam_from_ego_carla"], dtype=np.float32)
-        # Differenza sulla componente Y (traslazione nella colonna 3, riga 1)
         baseline = float(abs(T_right[1, 3] - T_left[1, 3]))
     elif "baseline" in data:
         baseline = float(data["baseline"])
     else:
         raise KeyError(f"Impossibile calcolare il baseline stereo dal file {calib_path}")
 
-    # Matrice di trasformazione estrinseca della telecamera sinistra
+    #matrice di trasformazione estrinseca della telecamera sinistra
     T_matrix = np.array(cam_left.get("extrinsic_cam_from_ego_carla", np.eye(4)), dtype=np.float32)
 
     return {
