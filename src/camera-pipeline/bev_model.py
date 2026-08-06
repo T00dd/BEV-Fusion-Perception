@@ -8,26 +8,26 @@ import torch.nn as nn
 from model import DetectionHead2d 
 
 
-class CameraBEVNet(nn.Model):
+class CameraBEVNet(nn.Module):
 
     #ramo per camera: backbone HRNet, lifting geometrico, bev pooling, head bev (temporanea)
     #il gradiente della loss bev risale fino al backbone
 
     def __init__(
         self,
-        cgf,
+        cfg,
         pretrained: bool = True,
         backbone_checkpoint_path: Optional[Path] = None
     ):
         super().__init__()
-        self.cgf = cgf
+        self.cfg = cfg
 
         #carico backbone da timm con features only
         self.backbone = timm.create_model(
-            cgf.backbone_name,
+            self.cfg.backbone_name,
             pretrained=pretrained,
             features_only=True,
-            out_indices=(cgf.feature_index,),
+            out_indices=(cfg.feature_index,),
         )
 
 
@@ -61,14 +61,14 @@ class CameraBEVNet(nn.Model):
             print(f"[BEV] Warning: Unexpected keys in backbone state_dict: {unexpected}")
 
     
-    def lift_to_bev(self, features_map, depth, k, t):
+    def lift_to_bev(self, features_map, depth, K, T):
 
         # feature_map (B, C, Hf, Wf) B=batch size, C=channels, Hf=height feature map, Wf=width feature map
         # depth (B, H, W) B=batch size, H=height image, W=width image
         # K (B, 4) B=batch size, 4=[fx, fy, cx, cy] fx=focal length x, fy=focal length y, cx=principal point x, cy=principal point y
         # T (B, 4, 4) B=batch size, 4x4 matrice di trasformazione da camera a coordinate mondo
         B, C, Hf, Wf = features_map.shape
-        cfg = self.cgf
+        cfg = self.cfg
         Hb, Wb = cfg.bev_H, cfg.bev_W
         s = cfg.feature_stride
         device = features_map.device
@@ -119,13 +119,13 @@ class CameraBEVNet(nn.Model):
         batch_idx = torch.arange(B, device=device).unsqueeze(1).expand(B, N)
         lin = ((batch_idx * Hb + rows.clamp(0, Hb - 1)) * Wb + cols.clamp(0, Wb - 1)).reshape(-1)
 
-        feats = feature_map.reshape(B, C, -1).permute(0, 2, 1).reshape(-1, C)
+        feats = features_map.reshape(B, C, -1).permute(0, 2, 1).reshape(-1, C)
         idx = lin[valid]
 
 
         #costruzione fisica della mappa bev
-        bev = feature_map.new_zeros(B * Hb * Wb, C)
-        counts = feature_map.new_zeros(B * Hb * Wb, 1)
+        bev = features_map.new_zeros(B * Hb * Wb, C)
+        counts = features_map.new_zeros(B * Hb * Wb, 1)
 
         #prende le info visive dei punti validi e le mette nelle corrispondenti celle
         #se piu punti finiscono nella stessa cella le informazioni si sommano

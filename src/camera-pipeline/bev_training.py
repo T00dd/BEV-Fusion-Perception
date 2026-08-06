@@ -340,8 +340,7 @@ def main():
  
     train_loader, val_loader = build_dataloaders(cfg)
  
-    model = CameraBEVNet(cfg, pretrained=True,
-                         backbone_checkpoint=cfg.backbone_checkpoint).to("cuda")
+    model = CameraBEVNet(cfg, pretrained=True, backbone_checkpoint_path=cfg.backbone_checkpoint).to("cuda")
     print(f"[Model] Totale parametri: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
  
     loss_fn = WarmupLoss(

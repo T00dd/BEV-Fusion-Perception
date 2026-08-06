@@ -171,7 +171,7 @@ class BEVDataset(Dataset):
 
     def _load_depth (self, scene_dir: Path, frame_stem: str, fx_work: float, baseline: float) -> np.ndarray:
 
-        cfg.self.cfg
+        cfg = self.cfg
 
         if cfg.depth_source == "precomputed":
             #depth pregenerate e salvate in file .npy
