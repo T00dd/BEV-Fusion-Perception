@@ -96,8 +96,10 @@ def main():
     for i, (scene_id, frame_stem) in enumerate(frames):
         scene_dir = root / "scenes" / scene_id
 
-        out_dir = cfg.depth_dir
+        out_dir = Path(cfg.depth_dir)
+        out_dir = Path(cfg.depth_dir) / scene_id 
         out_path = out_dir / f"{frame_stem}.npy"
+
         if out_path.is_file() and not args.overwrite and not args.compare:
             skipped += 1
             continue
