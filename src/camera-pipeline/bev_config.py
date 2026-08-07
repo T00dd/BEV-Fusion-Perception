@@ -94,6 +94,11 @@ class BEVConfig:
     grad_clip_norm: float = 1.0
     seed: int = 14
 
+    #wandb for monitoring
+    use_wandb: bool = True
+    wandb_project: str = "HRNet-bev-Cone-Detection"
+    wandb_run_name: str = "bev-run-02"
+
     @property
     def bev_H(self) -> int:
         return int(round((self.x_max - self.x_min) / self.resolution))

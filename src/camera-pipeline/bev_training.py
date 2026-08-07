@@ -3,6 +3,7 @@ import argparse
 import random
 from pathlib import Path
 from typing import Dict, List
+import wandb
  
 import numpy as np
 import torch
@@ -14,7 +15,7 @@ from torch.utils.data import DataLoader
 #carica il backbone allenato nel warmup e allena backbone (lr basso) + head BEV (lr alto). Lifting e pooling sono fissi ma differenziabili.
  
 from bev_config import BEVConfig
-from bev_dataset import BEVDataset, load_cones_3d, world_to_grid, COLOR_TO_CLASS
+from bev_dataset import BEVDataset, cone_visible, load_calib, load_cones_3d, world_to_grid, COLOR_TO_CLASS
 from bev_model import CameraBEVNet
 from losses import WarmupLoss                                    #riciclato da  warmup
 from logger import TrainingLogger                                #riciclato da  warmup
@@ -55,11 +56,19 @@ class BEVValidationAccumulator:
  
             scene_id, frame_stem = sample_ids[b].split("/")
             labels_path = Path(cfg.dataset_root) / "scenes" / scene_id / "labels" / f"{frame_stem}.json"
- 
+            calib_path = Path(cfg.dataset_root) / "scenes" / scene_id / "calib.yaml"
+
+            calib = load_calib(calib_path)
+
             gt = []
             for c in load_cones_3d(labels_path):
                 if COLOR_TO_CLASS.get(c["color"]) is None:
                     continue
+
+                #filtro fov
+                if not cone_visible(c, calib):
+                    continue
+
                 row, col = world_to_grid(c["x"], c["y"], cfg)
                 #i coni fuori griglia sono  strutturalmente fuori dal dominio del modello quindi non contano come FN
                 if not (0 <= row < cfg.bev_H and 0 <= col < cfg.bev_W):
@@ -130,8 +139,17 @@ def save_bev_visualizations(pred_heatmap_logits, pred_offset, sample_ids,
 
         # GT: posizioni vere dei coni dai label CARLA (in grid)
         labels_path = Path(cfg.dataset_root) / "scenes" / scene_id / "labels" / f"{frame_stem}.json"
+        calib_path = Path(cfg.dataset_root) / "scenes" / scene_id / "calib.yaml"
+        
+        # Carichiamo la calibrazione per il filtro FOV
+        calib = load_calib(calib_path)
+
         gt_cones = []
         for c in load_cones_3d(labels_path):
+            # Filtra i coni fantasma anche nella visualizzazione!
+            if not cone_visible(c, calib):
+                continue
+
             cls = COLOR_TO_CLASS.get(c["color"])
             row, col = world_to_grid(c["x"], c["y"], cfg)
             if cls is not None and 0 <= row < cfg.bev_H and 0 <= col < cfg.bev_W:
@@ -238,49 +256,23 @@ def train_one_epoch(model, loader, optimizer, scheduler, loss_fn, cfg,
  
         lrs = [pg["lr"] for pg in optimizer.param_groups]
         logger.log_step(epoch, global_step, log_dict, lrs[0], lrs[1] if len(lrs) > 1 else lrs[0])
+
+        if cfg.use_wandb and global_step % cfg.log_every_n_steps == 0:
+            wandb.log({
+                "train/loss_total": log_dict["loss_total"],
+                "train/loss_focal": log_dict["loss_focal"],
+                "train/loss_offset": log_dict["loss_offset"],
+                "lr/backbone": lrs[0],
+                "lr/head": lrs[1] if len(lrs) > 1 else lrs[0],
+                "epoch": epoch
+            }, step=global_step)
+
+
         global_step += 1
  
     for k in epoch_losses:
         epoch_losses[k] /= max(num_batches, 1)
     return global_step, epoch_losses
- 
- 
-@torch.no_grad()
-def validate(model, loader, loss_fn, val_accumulator, cfg, epoch):
-    model.eval()
-    val_accumulator.reset()
- 
-    sum_losses = {"loss_total": 0.0, "loss_focal": 0.0, "loss_offset": 0.0}
-    num_batches = 0
- 
-    for batch_idx, batch in enumerate(loader):
-        inputs, targets = to_device(batch, "cuda")
-        sample_ids = batch["sample_id"]
- 
-        with autocast(device_type="cuda", dtype=torch.bfloat16):
-            predictions = model(*inputs)
-            loss, log_dict = loss_fn(predictions, targets)
- 
-        for k, v in log_dict.items():
-            sum_losses[k] += v
-        num_batches += 1
- 
-        val_accumulator.update(predictions["heatmap_logits"].float(),
-                               predictions["offset_pred"].float(), sample_ids)
- 
-        if cfg.save_visualizations and batch_idx == 0:
-            save_bev_visualizations(
-                predictions["heatmap_logits"].float(), predictions["offset_pred"].float(),
-                list(sample_ids), cfg, "../visualizations_bev", epoch,
-                max_to_save=cfg.num_visualizations_per_val,
-            )
- 
-    for k in sum_losses:
-        sum_losses[k] /= max(num_batches, 1)
- 
-    result = {f"val_{k}": v for k, v in sum_losses.items()}
-    result.update({f"val_{k}": v for k, v in val_accumulator.compute().items()})
-    return result
 
 
 @torch.no_grad()
@@ -362,6 +354,14 @@ def main():
     args = parser.parse_args()
  
     cfg = BEVConfig()
+
+    if cfg.use_wandb:
+        wandb.init(
+            project=cfg.wandb_project,
+            name=cfg.wandb_run_name,
+            config=vars(cfg) if not isinstance(cfg, dict) else cfg
+        )
+
     if args.dataset_root:
         cfg.dataset_root = Path(args.dataset_root)
     if args.output_dir:
@@ -428,6 +428,10 @@ def main():
             val_metrics = validate(model, val_loader, loss_fn, val_accumulator, cfg, epoch)
             epoch_summary.update(val_metrics)
             logger.log_epoch(epoch, epoch_summary)
+            
+            #log validation metrics su WandB se attivato
+            if cfg.use_wandb:
+                wandb.log(epoch_summary, step=global_step)
  
             if val_metrics.get("val_f1", 0.0) > best_val_f1:
                 best_val_f1 = val_metrics["val_f1"]
@@ -446,6 +450,9 @@ def main():
     print("\n[Done] Training BEV completato.")
     print(f"Best val F1: {best_val_f1:.4f}")
     print(f"Deliverable per la fusione: {cfg.models_dir}/camera_branch.pth")
+
+    if cfg.use_wandb:
+        wandb.finish()
  
  
 if __name__ == "__main__":
