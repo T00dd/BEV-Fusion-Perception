@@ -41,39 +41,35 @@ def load_calib(calib_path: Path) -> Dict:
     with open(calib_path, "r") as f:
         data = yaml.safe_load(f)
     
-    cams = data.get("cameras", {})
-    if "left" not in cams:
-        raise KeyError(f"Struttura non valida in {calib_path}: chiave 'cameras.left' mancante.")
-        
+    cams = data["cameras"]
     cam_left = cams["left"]
-    
-    #estrazione di fx, fy, cx, cy dalla matrice intrinsic_K 3x3
     K_mat = cam_left["intrinsic_K"]
-    fx = float(K_mat[0][0])
-    fy = float(K_mat[1][1])
-    cx = float(K_mat[0][2])
-    cy = float(K_mat[1][2])
-    
-    width = int(cam_left["width"])
-    height = int(cam_left["height"])
-    
-    if "right" in cams and "extrinsic_cam_from_ego_carla" in cams["left"] and "extrinsic_cam_from_ego_carla" in cams["right"]:
-        T_left = np.array(cams["left"]["extrinsic_cam_from_ego_carla"], dtype=np.float32)
-        T_right = np.array(cams["right"]["extrinsic_cam_from_ego_carla"], dtype=np.float32)
-        baseline = float(abs(T_right[1, 3] - T_left[1, 3]))
-    elif "baseline" in data:
-        baseline = float(data["baseline"])
-    else:
-        raise KeyError(f"Impossibile calcolare il baseline stereo dal file {calib_path}")
+    fx, fy = float(K_mat[0][0]), float(K_mat[1][1])
+    cx, cy = float(K_mat[0][2]), float(K_mat[1][2])
 
-    #matrice di trasformazione estrinseca della telecamera sinistra
-    T_matrix = np.array(cam_left.get("extrinsic_cam_from_ego_carla", np.eye(4)), dtype=np.float32)
+    #camera -> ego
+    T_cam = np.array(cam_left["extrinsic_cam_from_ego_carla"], dtype=np.float64)
+    T_lid = np.array(data["extrinsic_lidar_from_ego_carla"], dtype=np.float64)
+    R_cam, t_cam, t_lid = T_cam[:3, :3], T_cam[:3, 3], T_lid[:3, 3]
+
+    #ottico -> corpo carla -> ego carla -> lidar -> frame label
+    #M: inversa di (x,y,z)->(y,-z,x)
+    M = np.array([[0, 0, 1], [1, 0, 0], [0, -1, 0]], dtype=np.float64)
+    #N: carla y-destra -> frame label y-sinistra
+    N = np.diag([1.0, -1.0, 1.0])
+
+    T = np.eye(4, dtype=np.float64)
+    T[:3, :3] = N @ R_cam @ M
+    T[:3, 3] = N @ (t_cam - t_lid)      #origine sul LIDAR non su ego
+
+    t_right = np.array(cams["right"]["extrinsic_cam_from_ego_carla"], dtype=np.float64)[:3, 3]
+    baseline = float(abs(t_right[1] - t_cam[1]))
 
     return {
         "K": np.array([fx, fy, cx, cy], dtype=np.float32),
-        "calib_size": (height, width),
+        "calib_size": (int(cam_left["height"]), int(cam_left["width"])),
         "baseline": baseline,
-        "T": T_matrix,
+        "T": T.astype(np.float32),
     }
 
 
@@ -90,7 +86,7 @@ def load_cones_3d(labels_path: Path) -> List[Dict]:
             x, y = c["position"][0], c["position"][1]
         else:
             x, y = c["x"], c["y"]
-        cones.append({"x": float(x), "y": float(y), "color": c.get("color", "unknown")})
+        cones.append({"x": float(x), "y": float(y), "color": c.get("class", c.get("color", "unknown"))})
     return cones
 
 
