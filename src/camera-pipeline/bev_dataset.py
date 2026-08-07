@@ -70,8 +70,25 @@ def load_calib(calib_path: Path) -> Dict:
         "calib_size": (int(cam_left["height"]), int(cam_left["width"])),
         "baseline": baseline,
         "T": T.astype(np.float32),
+        "T_inv": np.linalg.inv(T).astype(np.float32),   # label -> ottico
     }
 
+
+def cone_visible(cone, calib, cone_height: float = 0.32) -> bool:
+
+    T_inv = calib["T_inv"]
+    fx, fy, cx, cy = calib["K"]
+    H, W = calib["calib_size"]
+
+    for dz in (0.0, cone_height):
+        p = T_inv[:3, :3] @ np.array([cone["x"], cone["y"], cone["z"] + dz]) + T_inv[:3, 3]
+        if p[2] <= 1e-6:            #dietro la camera
+            continue
+        u = fx * p[0] / p[2] + cx
+        v = fy * p[1] / p[2] + cy
+        if 0 <= u < W and 0 <= v < H:
+            return True
+    return False
 
 
 def load_cones_3d(labels_path: Path) -> List[Dict]:
@@ -83,10 +100,16 @@ def load_cones_3d(labels_path: Path) -> List[Dict]:
     cones = []
     for c in raw:
         if "position" in c:
-            x, y = c["position"][0], c["position"][1]
+            x, y, z = c["position"][0], c["position"][1], c["position"][2]
         else:
-            x, y = c["x"], c["y"]
-        cones.append({"x": float(x), "y": float(y), "color": c.get("class", c.get("color", "unknown"))})
+            x, y, z = c["x"], c["y"], c.get("z", 0.0) # Fallback a 0.0 se z non esiste
+        
+        cones.append({
+            "x": float(x), 
+            "y": float(y), 
+            "z": float(z), 
+            "color": c.get("class", c.get("color", "unknown"))
+        })
     return cones
 
 
@@ -236,7 +259,12 @@ class BEVDataset(Dataset):
  
         #gt bev dai label 3d (già nel frame veicolo)
         cones = load_cones_3d(scene_dir / "labels" / f"{frame_stem}.json")
-        heatmap, offset, offset_mask = generate_bev_heatmap_offset_mask(cones, self.cfg)
+        
+        #filtro FOV: scarta i coni che la telecamera non può vedere
+        visible_cones = [c for c in cones if cone_visible(c, calib)]
+        
+        #genera le mappe per la loss solo sui coni visibili
+        heatmap, offset, offset_mask = generate_bev_heatmap_offset_mask(visible_cones, self.cfg)
  
         return {
             "image": image_tensor,
@@ -246,5 +274,6 @@ class BEVDataset(Dataset):
             "heatmap": torch.from_numpy(heatmap),
             "offset": torch.from_numpy(offset),
             "offset_mask": torch.from_numpy(offset_mask),
+            "cones_gt": visible_cones,  #passati per l'accumulatore metriche
             "sample_id": f"{scene_id}/{frame_stem}",
         }
