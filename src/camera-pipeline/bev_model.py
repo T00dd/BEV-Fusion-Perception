@@ -104,7 +104,7 @@ class CameraBEVNet(nn.Module):
 
         #calcolo delle celle bev
         #prima conversiamo le distanxe in metri (x, y) negli indici riga e colonna della griglia bev
-        rows = torch.floor((cfg.x_max - x_v) / cfg.resolution).long()
+        rows = torch.floor((x_v - cfg.x_min) / cfg.resolution).long()
         cols = torch.floor((cfg.y_max - y_v) / cfg.resolution).long()
 
         d_flat = d.reshape(B, -1)
