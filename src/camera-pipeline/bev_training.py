@@ -86,27 +86,74 @@ class BEVValidationAccumulator:
 #VISUALIZATION----------------------------------------------------------------
 
 
-def save_bev_visualizations(images, bev_gt, bev_pred_logits, sample_ids, output_dir, epoch, max_to_save=8, scale=2):
-    #[camera | BEV GT | BEV pred] come nel warmup
+from pathlib import Path
+import matplotlib
+matplotlib.use("Agg")   # backend senza display, per server headless
+import matplotlib.pyplot as plt
+import torch
+
+from bev_dataset import COLOR_TO_CLASS, load_cones_3d, world_to_grid, grid_to_world
+from metrics import extract_peaks_from_heatmap
+
+_CLASS_COLORS = {0: "#2b6cb0", 1: "#d4a017", 2: "#dd6b20"}
+
+def _draw_bev_panel(ax, cones, cfg, title, gt_cones=None):
+    for r in range(10, int(cfg.x_max) + 1, 10):          #anelli di distanza
+        ax.add_patch(plt.Circle((0, 0), r, fill=False, color="0.85", lw=0.8, zorder=0))
+        ax.text(0, r, f"{r}m", color="0.55", fontsize=7, ha="center", va="bottom", zorder=1)
+    ax.plot(0, 0, marker="^", color="0.15", markersize=11, zorder=6)   # veicolo
+    
+    if gt_cones is not None:                             #gt in trasparenza (pannello pred)
+        for c in gt_cones:
+            ax.scatter(c["y"], c["x"], s=110, facecolors="none", edgecolors=_CLASS_COLORS.get(c["cls"], "#808080"), linewidths=1.3, alpha=0.45, zorder=3)
+                       
+    for c in cones:
+        ax.scatter(c["y"], c["x"], s=42, color=_CLASS_COLORS.get(c["cls"], "#808080"), edgecolors="k", linewidths=0.4, zorder=4)
+                   
+    ax.set_xlim(cfg.y_max, cfg.y_min)    # +y (sinistra del veicolo) a sinistra
+    ax.set_ylim(cfg.x_min, cfg.x_max)    # veicolo in basso, lontano in alto
+    ax.set_aspect("equal")
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("y laterale (m)")
+    ax.set_ylabel("x avanti (m)")
+    ax.grid(True, color="0.93", lw=0.5)
+
+
+def save_bev_visualizations(pred_heatmap_logits, pred_offset, sample_ids,
+                            cfg, output_dir, epoch, max_to_save=8):
     output_dir = Path(output_dir) / f"epoch_{epoch:03d}"
     output_dir.mkdir(parents=True, exist_ok=True)
- 
-    for i in range(min(max_to_save, images.shape[0])):
-        img = denormalize_image(images[i])
-        gt = color_heatmap(bev_gt[i].cpu().numpy())
-        pred = color_heatmap(torch.sigmoid(bev_pred_logits[i]).cpu().numpy())
-        if scale > 1:
-            gt = np.repeat(np.repeat(gt, scale, 0), scale, 1)
-            pred = np.repeat(np.repeat(pred, scale, 0), scale, 1)
- 
-        h = gt.shape[0]
-        w = int(round(img.shape[1] * h / img.shape[0]))
-        img = np.asarray(Image.fromarray(img).resize((w, h), Image.BILINEAR))
- 
-        sep = np.full((h, 4, 3), 80, dtype=np.uint8)
-        panel = np.concatenate([img, sep, gt, sep, pred], axis=1)
-        Image.fromarray(panel).save(output_dir / f"{sample_ids[i].replace('/', '_')}.png")
+    probs = torch.sigmoid(pred_heatmap_logits)
 
+    for i in range(min(max_to_save, probs.shape[0])):
+        scene_id, frame_stem = sample_ids[i].split("/")
+
+        # GT: posizioni vere dei coni dai label CARLA (in grid)
+        labels_path = Path(cfg.dataset_root) / "scenes" / scene_id / "labels" / f"{frame_stem}.json"
+        gt_cones = []
+        for c in load_cones_3d(labels_path):
+            cls = COLOR_TO_CLASS.get(c["color"])
+            row, col = world_to_grid(c["x"], c["y"], cfg)
+            if cls is not None and 0 <= row < cfg.bev_H and 0 <= col < cfg.bev_W:
+                gt_cones.append({"x": c["x"], "y": c["y"], "cls": cls})
+
+        # Pred: picchi estratti (stesse detection della validation) -> metri
+        dets = extract_peaks_from_heatmap(
+            probs[i].cpu(), pred_offset[i].cpu(), stride=1, threshold=cfg.detection_threshold
+        )
+        pred_cones = []
+        for d in dets:
+            x, y = grid_to_world(d["y"], d["x"], cfg)   # d["y"]=riga, d["x"]=colonna
+            pred_cones.append({"x": x, "y": y, "cls": d["class_id"]})
+
+        fig, axs = plt.subplots(1, 2, figsize=(11, 6.5))
+        _draw_bev_panel(axs[0], gt_cones, cfg, "BEV GT (posizioni CARLA)")
+        _draw_bev_panel(axs[1], pred_cones, cfg, "BEV pred (GT in trasparenza)", gt_cones=gt_cones)
+        fig.suptitle(f"{sample_ids[i]}  -  epoch {epoch:03d}", fontsize=11)
+        fig.tight_layout()
+        fig.savefig(output_dir / f"{sample_ids[i].replace('/', '_')}.png",
+                    dpi=110, bbox_inches="tight")
+        plt.close(fig)
 
 #SETUP AND DATA LOADER-------------------------------------------------------------
 
