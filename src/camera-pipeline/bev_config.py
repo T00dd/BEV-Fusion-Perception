@@ -19,7 +19,7 @@ class BEVConfig:
     #"precomputed": legge depth_sgbm/*.npy generati offline 
     #"online": calcola SGBM dentro __getitem__ (comodo per debug)
     #"carla_gt": usa la depth GT di CARLA 
-    depth_source: str = "precomputed"
+    depth_source: str = "carla_gt"  # "precomputed", "online", "carla_gt"
     depth_dir: str = "depth_sgbm"      # sottocartella scena per "precomputed"
     depth_gt_dir: str = "depth"        # depth CARLA, riferimento
     min_depth_m: float = 0.3
@@ -27,7 +27,7 @@ class BEVConfig:
 
     #parametri SGBM (usati con depth_source="online" e da precompute_depth.py)
     sgbm_min_disp: int = 0
-    sgbm_num_disp: int = 128           #deve coprire la disparità a distanza minima
+    sgbm_num_disp: int = 192           #deve coprire la disparità a distanza minima
     sgbm_block_size: int = 5
     sgbm_uniqueness_ratio: int = 10
     sgbm_speckle_window_size: int = 100

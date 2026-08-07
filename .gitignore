@@ -3,3 +3,4 @@ src/visualizations
 src/models
 src/camera-pipeline/checkpoints
 src/camera-pipeline/plotting/plots
+src/camera-pipeline/depth_sgbm
