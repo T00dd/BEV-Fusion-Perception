@@ -76,7 +76,7 @@ class BEVValidationAccumulator:
                 gt.append({
                     "color": c["color"],
                     "center_px": (col, row),
-                    "depth_m": float(np.hypot(c["x"], c["y"])),
+                    "depth_m": float(np.hypot(c["x"])),
                     "fully_in_image": True,
                 })
  
