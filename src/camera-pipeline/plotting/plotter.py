@@ -140,4 +140,4 @@ def plot_training_results(step_csv, epoch_csv, output_dir="plots"):
     print(f"I grafici (inclusa l'analisi per distanza) sono stati generati e salvati in '{out_dir}/'")
 
 if __name__ == "__main__":
-    plot_training_results('../checkpoints/warmup/step_log.csv', '../checkpoints/warmup/epoch_log.csv', output_dir='plots')
+    plot_training_results('../checkpoints/bev/step_log.csv', '../checkpoints/bev/epoch_log.csv', output_dir='plots')
