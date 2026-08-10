@@ -77,7 +77,7 @@ def compare_depth(
     depth_pred: np.ndarray,
     depth_gt: np.ndarray,
     max_depth_m: float = 50.0,
-    bins: Tuple[Tuple[float, float], ...] = ((0, 5), (5, 10), (10, 15), (15, 20), (20, 50)),
+    bins: Tuple[Tuple[float, float], ...] = ((0, 5), (5, 10), (10, 15), (15, 20), (20, 30), (30, 50)),
 ) -> Dict[str, float]:
     
     #confronta la depth SGBM con quella GT di CARLA sui soli pixel dove entrambe sono valide

@@ -38,7 +38,7 @@ def print_report(stats):
     print("\n  per fascia di distanza (l'errore stereo cresce con z^2):")
     print(f"  {'fascia':>10} | {'MAE (m)':>9} | {'coverage':>9}")
     print("  " + "-" * 34)
-    for lo, hi in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 50)]:
+    for lo, hi in [(0, 5), (5, 10), (10, 15), (15, 20), (20, 30), (30, 50)]:
         mae = stats.get(f"mae_{lo}-{hi}m", float("nan"))
         cov = stats.get(f"coverage_{lo}-{hi}m", float("nan"))
         print(f"  {f'{lo}-{hi}m':>10} | {mae:9.3f} | {cov*100:8.2f}%")

@@ -160,7 +160,7 @@ def compute_metrics(
 
     #stratificazione per distanza
 
-    areas = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 50)]
+    areas = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 30), (30, 50)]
     for lo, hi in areas:
         tp_in_bin = sum(1 for d in all_tp if lo <= d.get("gt_depth_m", -1) < hi)
         fn_in_bin = sum(1 for d in all_fn if lo <= d.get("depth_m", -1) < hi)
