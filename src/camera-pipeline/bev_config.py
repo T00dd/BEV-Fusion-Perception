@@ -58,8 +58,8 @@ class BEVConfig:
     feature_index: int = 1
     feature_stride: int = 4
     num_classes: int = 3
-    head_hidden_channels: int = 64
-    head_num_layers: int = 3
+    head_hidden_channels: int = 128
+    head_num_layers: int = 5
 
     #loss
     focal_loss_weight: float = 1.0
