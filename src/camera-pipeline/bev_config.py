@@ -7,7 +7,7 @@ from typing import Tuple
 class BEVConfig:
 
     #paths
-    dataset_root: Path = Path("../../../dataset")
+    dataset_root: Path = Path("../../carla_dataset_three_classses")
     output_dir: Path = Path("./checkpoints/bev")
     models_dir: Path = Path("../models")
     depth_dir: Path = Path("../../data/depth_sgbm")
@@ -69,10 +69,10 @@ class BEVConfig:
 
     #training
     num_epochs: int = 30
-    batch_size: int = 8
+    batch_size: int = 16
     num_workers: int = 12
-    backbone_lr: float = 1e-5
-    head_lr: float = 3e-4
+    backbone_lr: float = 2e-5
+    head_lr: float = 4e-4
     weight_decay: float = 1e-4
     warmup_epochs: int = 3
 
@@ -95,7 +95,7 @@ class BEVConfig:
     seed: int = 14
 
     #wandb for monitoring
-    use_wandb: bool = True
+    use_wandb: bool = False
     wandb_project: str = "HRNet-bev-Cone-Detection"
     wandb_run_name: str = "bev-run-02"
 
