@@ -75,52 +75,7 @@ class CameraBEVNet(nn.Module):
         s = cfg.feature_stride
         device = features_map.device
 
-
-        #depth al centro del pixel di ogni cella della feature map
-
-        #creazione della griglia di coordinate pixel della feature map
-        us = torch.arange(Wf, device=device, dtype=torch.float32) * s + s / 2.0
-        vs = torch.arange(Hf, device=device, dtype=torch.float32) * s + s / 2.0
         
-        #prende i valori di depth corrispondenti alle coordinate della feature map, clamp per evitare out of bounds
-        d = depth.index_select(1, vs.long().clamp(max=depth.shape[1] - 1)) \
-                 .index_select(2, us.long().clamp(max=depth.shape[2] - 1))
-        #il risultato e' la matrice d dove ogni pixel ha la distanza stimata
-
-        #proiezione su piano tridimensionale delle feature della matrice d
-        #usiamo la formula di proiezione inversa: X = (u - cx) * Z / fx, Y = (v - cy) * Z / fy, Z = d
-        #usiamo le matrici intrinseche K e la trasformazione T per ottenere le coordinate mondo
-        fx, fy, cx, cy = (K[:, i].view(B, 1, 1) for i in range(4))
-        x_cam = (us.view(1, 1, Wf) - cx) * d / fx
-        y_cam = (vs.view(1, Hf, 1) - cy) * d / fy
-        pts = torch.stack([x_cam, y_cam.expand_as(d), d], dim=1).reshape(B, 3, -1)
-
-
-        #spostamento del sistema di riferimento dalla camera al centro della macchina usando matrici di trasformazione
-        
-        #METTERSI D'ACCORDO CON ANDRE SUL SISTEMA DI RIFERIMENTO!!!!!!!!!!!!!!!!!!!!!!
-        pts_v = torch.bmm(T[:, :3, :3], pts) + T[:, :3, 3:4]
-        x_v, y_v = pts_v[:, 0], pts_v[:, 1]
-        #METTERSI D'ACCORDO CON ANDRE SUL SISTEMA DI RIFERIMENTO!!!!!!!!!!!!!!!!!!!!!!
-
-
-        #calcolo delle celle bev
-        #prima conversiamo le distanxe in metri (x, y) negli indici riga e colonna della griglia bev
-        rows = torch.floor((x_v - cfg.x_min) / cfg.resolution).long()
-        cols = torch.floor((cfg.y_max - y_v) / cfg.resolution).long()
-
-        d_flat = d.reshape(B, -1)
-        #eliminazione dei punti fuori dalla griglia bev o con profondità non valida con maschera
-        valid = ((d_flat > 0) & torch.isfinite(d_flat)
-                & (rows >= 0) & (rows < Hb)
-                & (cols >= 0) & (cols < Wb)).reshape(-1)
-        
-
-        #FLATTEENING
-        N = rows.shape[1]
-        batch_idx = torch.arange(B, device=device).unsqueeze(1).expand(B, N)
-        lin = ((batch_idx * Hb + rows.clamp(0, Hb - 1)) * Wb + cols.clamp(0, Wb - 1)).reshape(-1)
-
         s = cfg.feature_stride
         sub = getattr(cfg, "lift_subsamples", 2)   #2x2 punti per cella
         step = s / sub
@@ -133,26 +88,39 @@ class CameraBEVNet(nn.Module):
             for oj in range(sub):
                 off_u = step * (oj + 0.5)
                 off_v = step * (oi + 0.5)
+
+                #creazione della griglia di coordinate pixel della feature map
                 us = torch.arange(Wf, device=device, dtype=torch.float32) * s + off_u
                 vs = torch.arange(Hf, device=device, dtype=torch.float32) * s + off_v
+
+                #prende i valori di depth corrispondenti alle coordinate della feature map, clamp per evitare out of bounds
                 d = depth.index_select(1, vs.long().clamp(max=depth.shape[1]-1)) \
                          .index_select(2, us.long().clamp(max=depth.shape[2]-1))
 
+                #proiezione su piano tridimensionale delle feature della matrice d
+                #usiamo la formula di proiezione inversa: X = (u - cx) * Z / fx, Y = (v - cy) * Z / fy, Z = d
+                #usiamo le matrici intrinseche K e la trasformazione T per ottenere le coordinate mondo
                 fx_, fy_, cx_, cy_ = (K[:, i].view(B,1,1) for i in range(4))
                 x_cam = (us.view(1,1,Wf) - cx_) * d / fx_
                 y_cam = (vs.view(1,Hf,1) - cy_) * d / fy_
                 pts = torch.stack([x_cam.expand_as(d), y_cam.expand_as(d), d], 1).reshape(B,3,-1)
 
+                #spostamento del sistema di riferimento dalla camera al centro della macchina usando matrici di trasformazione
                 pts_v = torch.bmm(T[:, :3, :3], pts) + T[:, :3, 3:4]
                 x_v, y_v = pts_v[:, 0], pts_v[:, 1]
 
+                #calcolo delle celle bev
+                #prima conversiamo le distanxe in metri (x, y) negli indici riga e colonna della griglia bev
                 rows = torch.floor((x_v - cfg.x_min) / cfg.resolution).long()
                 cols = torch.floor((cfg.y_max - y_v) / cfg.resolution).long()
                 d_flat = d.reshape(B, -1)
+
+                #eliminazione dei punti fuori dalla griglia bev o con profondità non valida con maschera
                 valid = ((d_flat > 0) & torch.isfinite(d_flat)
                          & (rows >= 0) & (rows < Hb)
                          & (cols >= 0) & (cols < Wb)).reshape(-1)
 
+                #FLATTEENING
                 N = rows.shape[1]
                 batch_idx = torch.arange(B, device=device).unsqueeze(1).expand(B, N)
                 lin = ((batch_idx * Hb + rows.clamp(0, Hb-1)) * Wb + cols.clamp(0, Wb-1)).reshape(-1)
@@ -164,8 +132,6 @@ class CameraBEVNet(nn.Module):
         bev = bev.reshape(B, Hb, Wb, C).permute(0, 3, 1, 2).contiguous()
         occ = torch.log1p(counts).reshape(B, Hb, Wb, 1).permute(0, 3, 1, 2).contiguous()
         return self.bev_proj(torch.cat([bev, occ], dim=1))
-
-        #ricordarsi di togliere codice morto sopra!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         
 
     def forward(self, images, depth, K, T) -> Dict[str, torch.Tensor]:
