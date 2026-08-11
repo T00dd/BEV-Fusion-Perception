@@ -11,6 +11,10 @@ import torch
 import torch.nn.functional as F
 
 
+DISTANCE_BINS_2D = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 100)]
+DISTANCE_BINS_BEV = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 30), (30, 50)]
+
+
 def extract_peaks_from_heatmap(
         heatmap: torch.Tensor,
         offset: torch.Tensor,
@@ -76,12 +80,12 @@ def match_detections_to_gt(
     #asxocia detections a coni nel gt usando una soglia minima di distanza
     #restituisce TP, FP, FN
 
-    color_to_class = {
-        "blue": 0, 
-        "yellow" : 1, 
-        "orange_small": 2
-    }
-
+    if color_to_class is None:
+        color_to_class = {
+            "blue": 0,
+            "yellow": 1, 
+            "orange_small": 2
+        }
     gt_items = []
 
     for cone in ground_truth:
@@ -146,6 +150,9 @@ def compute_metrics(
 ) -> Dict[str, float]:
 
     #calcolo di precision, recall, F1 e l'errore in base alla distanza
+
+    if distance_bins is None:
+        distance_bins = DISTANCE_BINS_2D
 
     tp_count = len(all_tp)
     fp_count = len(all_fp)
@@ -239,17 +246,19 @@ class ValidationAccumulator:
 
     #accumula TP, FP, FN su tutti i batch di validation per calcolare metriche globali
 
-    def __init__(self, dataset_root: Path, stride: int, threshold: float = 0.3, match_radius_px: float = 10.0):
+    def __init__(self, dataset_root: Path, stride: int, threshold: float = 0.3, match_radius_px: float = 10.0, num_classes: int = 3):
         self.dataset_root = Path(dataset_root)
         self.stride = stride
         self.threshold = threshold
         self.match_radius_px = match_radius_px
+        self.num_classes = num_classes
         self.reset()
 
     def reset(self):
         self.all_tp = []
         self.all_fp = []
         self.all_fn = []
+        self.all_tp_agnostic = []
 
     def update(
         self,
@@ -289,6 +298,17 @@ class ValidationAccumulator:
             self.all_fp.extend(fp)
             self.all_fn.extend(fn)
 
+            tp_agn, _, _ = match_detections_to_gt(
+                detections,
+                cones_data["cones_in_image"],
+                match_radius_px=self.match_radius_px,
+                class_agnostic=True,
+            )
+            self.all_tp_agnostic.extend(tp_agn)
+
 
     def compute(self) -> Dict[str, float]:
-        return compute_metrics(self.all_tp, self.all_fp, self.all_fn)
+        m = compute_metrics(self.all_tp, self.all_fp, self.all_fn, distance_bins=DISTANCE_BINS_2D, num_classes=self.num_classes)
+        m.update(compute_color_metrics(self.all_tp_agnostic, self.num_classes))
+        m["ap"] = compute_ap(self.all_tp, self.all_fp, num_gt=len(self.all_tp) + len(self.all_fn))
+        return m

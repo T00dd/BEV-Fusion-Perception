@@ -42,6 +42,7 @@ class BEVValidationAccumulator:
     
     def reset(self):
         self.all_tp, self.all_fp, self.all_fn = [], [], []
+        self.all_tp_agnostic = []
 
 
     def update(self, heatmap_logits, offset_pred, sample_ids: List[str]):
@@ -70,7 +71,7 @@ class BEVValidationAccumulator:
                     continue
 
                 row, col = world_to_grid(c["x"], c["y"], cfg)
-                #i coni fuori griglia sono  strutturalmente fuori dal dominio del modello quindi non contano come FN
+                #i coni fuori griglia sono  fuori dal dominio quindi non contano come FN
                 if not (0 <= row < cfg.bev_H and 0 <= col < cfg.bev_W):
                     continue
                 gt.append({
@@ -80,19 +81,34 @@ class BEVValidationAccumulator:
                     "fully_in_image": True,
                 })
  
+            radius_cells = cfg.match_radius_m / cfg.resolution
+
             tp, fp, fn = match_detections_to_gt(
                 detections, gt,
-                match_radius_px=cfg.match_radius_m / cfg.resolution,  # metri -> celle
+                match_radius_px=radius_cells,
+                color_to_class=COLOR_TO_CLASS,
             )
             self.all_tp.extend(tp)
             self.all_fp.extend(fp)
             self.all_fn.extend(fn)
 
+            #secondo matching solo posizione
+            tp_agn, _, _ = match_detections_to_gt(
+                detections, gt,
+                match_radius_px=radius_cells,
+                color_to_class=COLOR_TO_CLASS,
+                class_agnostic=True,
+            )
+            self.all_tp_agnostic.extend(tp_agn)
+
     def confusion_matrix(self) -> np.ndarray:
         return confusion_matrix_from_tp(self.all_tp_agnostic, self.cfg.num_classes)
  
     def compute(self) -> Dict[str, float]:
-        return compute_metrics(self.all_tp, self.all_fp, self.all_fn)
+        m = compute_metrics(self.all_tp, self.all_fp, self.all_fn, distance_bins=DISTANCE_BINS_BEV, num_classes=self.cfg.num_classes)
+        m.update(compute_color_metrics(self.all_tp_agnostic, self.cfg.num_classes))
+        m["ap"] = compute_ap(self.all_tp, self.all_fp, num_gt=len(self.all_tp) + len(self.all_fn))
+        return m
 
 
 #VISUALIZATION----------------------------------------------------------------
