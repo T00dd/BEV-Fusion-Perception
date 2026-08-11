@@ -72,9 +72,11 @@ class BEVConfig:
     batch_size: int = 16
     num_workers: int = 12
     backbone_lr: float = 2e-5
-    head_lr: float = 4e-4
+    head_lr: float = 6e-4
     weight_decay: float = 1e-4
     warmup_epochs: int = 3
+
+    lift_subsamples: int = 2
 
     #augmentation: (non geometrica in quanto romperebbe la corrispondenza pixel <-> depth <-> calibrazione)
     color_jitter_brightness: float = 0.3
