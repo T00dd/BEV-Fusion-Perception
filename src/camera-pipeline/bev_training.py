@@ -19,7 +19,7 @@ from bev_dataset import BEVDataset, cone_visible, load_calib, load_cones_3d, wor
 from bev_model import CameraBEVNet
 from losses import WarmupLoss                                    #riciclato da  warmup
 from logger import TrainingLogger                                #riciclato da  warmup
-from metrics import extract_peaks_from_heatmap, match_detections_to_gt, compute_metrics  #riciclato da  warmup
+from metrics import extract_peaks_from_heatmap, match_detections_to_gt, compute_metrics, compute_color_metrics, compute_ap, confusion_matrix_from_tp, DISTANCE_BINS_BEV  #riciclato da  warmup
 from visualization import denormalize_image, color_heatmap       #riciclato da  warmup
 
 
@@ -87,6 +87,9 @@ class BEVValidationAccumulator:
             self.all_tp.extend(tp)
             self.all_fp.extend(fp)
             self.all_fn.extend(fn)
+
+    def confusion_matrix(self) -> np.ndarray:
+        return confusion_matrix_from_tp(self.all_tp_agnostic, self.cfg.num_classes)
  
     def compute(self) -> Dict[str, float]:
         return compute_metrics(self.all_tp, self.all_fp, self.all_fn)
@@ -200,6 +203,45 @@ def save_bev_visualizations(pred_heatmap_logits, pred_offset, sample_ids,
                     dpi=110, bbox_inches="tight")
         plt.close(fig)
         
+
+_CLASS_NAMES = {0: "blue", 1: "yellow", 2: "orange_small"}
+
+
+def save_confusion_matrix(matrix, cfg, output_dir, epoch):
+    #matrice di confusione dei colori, righe = GT, colonne = predetto
+    
+
+    output_dir = Path(output_dir) / f"epoch_{epoch:03d}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    n = cfg.num_classes
+    names = [_CLASS_NAMES.get(c, f"c{c}") for c in range(n)]
+
+    row_sums = matrix.sum(axis=1, keepdims=True)
+    normalized = matrix / np.maximum(row_sums, 1)
+
+    fig, ax = plt.subplots(figsize=(1.6 * n + 2.2, 1.6 * n + 1.8))
+    im = ax.imshow(normalized, cmap="Blues", vmin=0.0, vmax=1.0)
+
+    ax.set_xticks(range(n)); ax.set_xticklabels(names, rotation=30, ha="right")
+    ax.set_yticks(range(n)); ax.set_yticklabels(names)
+    ax.set_xlabel("predetto"); ax.set_ylabel("ground truth")
+
+    for i in range(n):
+        for j in range(n):
+            
+            color = "white" if normalized[i, j] > 0.55 else "black"
+            ax.text(j, i, f"{normalized[i, j]:.3f}\n({matrix[i, j]})",
+                    ha="center", va="center", fontsize=9, color=color)
+
+    accuracy = np.trace(matrix) / max(matrix.sum(), 1)
+    ax.set_title(f"Confusione colore - epoch {epoch:03d}\n"
+                 f"accuracy {accuracy:.4f} su {matrix.sum()} coni localizzati",
+                 fontsize=10)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    fig.savefig(output_dir / "confusion_matrix.png", dpi=110, bbox_inches="tight")
+    plt.close(fig)
 
 #SETUP AND DATA LOADER-------------------------------------------------------------
 
@@ -335,9 +377,13 @@ def validate(model, loader, loss_fn, val_accumulator, cfg, epoch):
  
     for k in sum_losses:
         sum_losses[k] /= max(num_batches, 1)
- 
+
     result = {f"val_{k}": v for k, v in sum_losses.items()}
     result.update({f"val_{k}": v for k, v in val_accumulator.compute().items()})
+
+    if cfg.save_visualizations:
+        save_confusion_matrix(val_accumulator.confusion_matrix(), cfg, "../visualizations_bev", epoch)
+
     return result
 
 

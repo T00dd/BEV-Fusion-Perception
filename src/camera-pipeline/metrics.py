@@ -68,7 +68,9 @@ def extract_peaks_from_heatmap(
 def match_detections_to_gt(
         detections: List[Dict],
         ground_truth: List[Dict],
-        match_radius_px: float = 10.0
+        match_radius_px: float = 10.0,
+        color_to_class: Dict[str, int] = None,
+        class_agnostic: bool = False
 ) -> Tuple[List[dict], List[dict], List[dict]]:
     
     #asxocia detections a coni nel gt usando una soglia minima di distanza
@@ -116,7 +118,7 @@ def match_detections_to_gt(
         for i, gt in enumerate(gt_items):
             if gt["matched"]:
                 continue
-            if gt["class"] != det["class_id"]:   # entrambi usano "class_id"
+            if not class_agnostic and gt["class"] != det["class_id"]:
                 continue
             dist = np.sqrt((det["x"] - gt["x_px"]) ** 2 + (det["y"] - gt["y_px"]) ** 2)
             if dist < match_radius_px and dist < best_dist:
@@ -124,7 +126,9 @@ def match_detections_to_gt(
                 best_idx = i
         if best_idx >= 0:
             gt_items[best_idx]["matched"] = True
-            true_positives.append({**det, "gt_depth_m": gt_items[best_idx]["depth_m"]})
+            true_positives.append({**det,
+                                    "gt_depth_m": gt_items[best_idx]["depth_m"],
+                                    "gt_class": gt_items[best_idx]["class"]})
         else:
             false_positives.append(det)
     
@@ -137,6 +141,8 @@ def compute_metrics(
         all_tp: List[Dict],
         all_fp: List[Dict], 
         all_fn: List[Dict],
+        distance_bins: List[Tuple[float, float]] = None,
+        num_classes: int = 2,
 ) -> Dict[str, float]:
 
     #calcolo di precision, recall, F1 e l'errore in base alla distanza
@@ -160,16 +166,73 @@ def compute_metrics(
 
     #stratificazione per distanza
 
-    areas = [(0, 5), (5, 10), (10, 15), (15, 20), (20, 30), (30, 50)]
-    for lo, hi in areas:
+    for lo, hi in distance_bins:
         tp_in_bin = sum(1 for d in all_tp if lo <= d.get("gt_depth_m", -1) < hi)
         fn_in_bin = sum(1 for d in all_fn if lo <= d.get("depth_m", -1) < hi)
         total_gt = tp_in_bin + fn_in_bin
-        recall_bin = tp_in_bin / max(total_gt, 1)
-        metrics[f"recall_{lo}-{hi}m"] = recall_bin
+        metrics[f"recall_{lo}-{hi}m"] = tp_in_bin / max(total_gt, 1)
         metrics[f"num_gt_{lo}-{hi}m"] = total_gt
 
+    #stratificazione per classe
+
+    for c in range(num_classes):
+        tp_c = sum(1 for d in all_tp if d["class_id"] == c)
+        fp_c = sum(1 for d in all_fp if d["class_id"] == c)
+        fn_c = sum(1 for g in all_fn if g["class"] == c)
+        p_c = tp_c / max(tp_c + fp_c, 1)
+        r_c = tp_c / max(tp_c + fn_c, 1)
+        metrics[f"precision_c{c}"] = p_c
+        metrics[f"recall_c{c}"] = r_c
+        metrics[f"f1_c{c}"] = 2 * p_c * r_c / max(p_c + r_c, 1e-6)
+        metrics[f"num_gt_c{c}"] = tp_c + fn_c
+
     return metrics
+
+
+def confusion_matrix_from_tp(tp_agnostic: List[Dict], num_classes: int) -> np.ndarray:
+    #matrice di confusione dei colori
+    #righe = classe GT
+    #colonne = classe predetta
+
+    matrix = np.zeros((num_classes, num_classes), dtype=int)
+    for d in tp_agnostic:
+        matrix[d["gt_class"], d["class_id"]] += 1
+    return matrix
+
+
+def compute_color_metrics(tp_agnostic: List[Dict], num_classes: int) -> Dict[str, float]:
+    matrix = confusion_matrix_from_tp(tp_agnostic, num_classes)
+
+    total = max(matrix.sum(), 1)
+    out = {"color_accuracy": float(np.trace(matrix)) / total}
+
+    for gt_c in range(num_classes):
+        denom = max(matrix[gt_c].sum(), 1)
+        out[f"color_acc_c{gt_c}"] = float(matrix[gt_c, gt_c]) / denom
+
+    #confusione blu e giallo: l'errore che inverte i lati del tracciato
+    if num_classes >= 2:
+        out["confusion_blue_as_yellow"] = int(matrix[0, 1])
+        out["confusion_yellow_as_blue"] = int(matrix[1, 0])
+
+    return out
+
+
+def compute_ap(all_tp: List[Dict], all_fp: List[Dict], num_gt: int) -> float:
+    #average precision
+    items = [(d["score"], 1) for d in all_tp] + [(d["score"], 0) for d in all_fp]
+    items.sort(key=lambda t: -t[0])
+
+    tp_cum = fp_cum = 0
+    ap = prev_recall = 0.0
+    for score, is_tp in items:
+        tp_cum += is_tp
+        fp_cum += 1 - is_tp
+        rec = tp_cum / max(num_gt, 1)
+        prec = tp_cum / max(tp_cum + fp_cum, 1)
+        ap += prec * (rec - prev_recall)
+        prev_recall = rec
+    return ap
 
 
 class ValidationAccumulator:
