@@ -150,10 +150,11 @@ def generate_bev_heatmap_offset_mask(cones: List[Dict], cfg) -> Tuple[np.ndarray
 
 class BEVDataset(Dataset):
 
-    def __init__(self, cfg, split_file: str, augment: bool = False, color_jitter_params: Optional[Dict] = None):
+    def __init__(self, cfg, split_file: str, augment: bool = True, color_jitter_params: Optional[Dict] = None):
         self.cfg = cfg
         self.dataset_root = Path(cfg.dataset_root)
         self.image_size = cfg.image_size
+        self.augment = augment
 
         #stessa logica warmup 2d
 
@@ -262,6 +263,21 @@ class BEVDataset(Dataset):
         
         #filtro FOV: scarta i coni che la telecamera non può vedere
         visible_cones = [c for c in cones if cone_visible(c, calib)]
+
+        #bev augmentation
+        T = calib["T"].copy()
+        if self.augment:
+            yaw = np.random.uniform(-8, 8) * np.pi / 180
+            dx, dy = np.random.uniform(-1.0, 1.0, 2)
+            c, s = np.cos(yaw), np.sin(yaw)
+            A = np.array([[c, -s, 0, dx],
+                          [s,  c, 0, dy],
+                          [0,  0, 1, 0.0],
+                          [0,  0, 0, 1.0]], dtype=np.float32)
+            T = A @ T
+            for cone in visible_cones:
+                cone["x"], cone["y"] = (c*cone["x"] - s*cone["y"] + dx,
+                                        s*cone["x"] + c*cone["y"] + dy)
         
         #genera le mappe per la loss solo sui coni visibili
         heatmap, offset, offset_mask = generate_bev_heatmap_offset_mask(visible_cones, self.cfg)
@@ -270,10 +286,9 @@ class BEVDataset(Dataset):
             "image": image_tensor,
             "depth": depth_t,
             "K": K,
-            "T": torch.from_numpy(calib["T"]),
+            "T": torch.from_numpy(T),
             "heatmap": torch.from_numpy(heatmap),
             "offset": torch.from_numpy(offset),
             "offset_mask": torch.from_numpy(offset_mask),
-            "cones_gt": visible_cones,  #passati per l'accumulatore metriche
             "sample_id": f"{scene_id}/{frame_stem}",
         }
