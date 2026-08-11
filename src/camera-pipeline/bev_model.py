@@ -34,6 +34,8 @@ class CameraBEVNet(nn.Module):
         feature_channels = self.backbone.feature_info.channels()[0]
         print(f"[BEV] Backbone {cfg.backbone_name}: {feature_channels} canali, " f"stride {self.backbone.feature_info.reduction()[0]}")
 
+        self.bev_proj = nn.Conv2d(feature_channels + 1, feature_channels, kernel_size=1)
+
         if backbone_checkpoint_path is not None:
             self._load_warmup_backbone(Path(backbone_checkpoint_path))
 
@@ -119,22 +121,51 @@ class CameraBEVNet(nn.Module):
         batch_idx = torch.arange(B, device=device).unsqueeze(1).expand(B, N)
         lin = ((batch_idx * Hb + rows.clamp(0, Hb - 1)) * Wb + cols.clamp(0, Wb - 1)).reshape(-1)
 
+        s = cfg.feature_stride
+        sub = getattr(cfg, "lift_subsamples", 2)   #2x2 punti per cella
+        step = s / sub
+
         feats = features_map.reshape(B, C, -1).permute(0, 2, 1).reshape(-1, C)
-        idx = lin[valid]
-
-
-        #costruzione fisica della mappa bev
         bev = features_map.new_zeros(B * Hb * Wb, C)
         counts = features_map.new_zeros(B * Hb * Wb, 1)
 
-        #prende le info visive dei punti validi e le mette nelle corrispondenti celle
-        #se piu punti finiscono nella stessa cella le informazioni si sommano
-        bev.index_add_(0, idx, feats[valid])
-        counts.index_add_(0, idx, torch.ones(idx.shape[0], 1, device=device, dtype=bev.dtype))
-        #fa la media evitando che le celle con piu punti abbiano valori piu alti
-        bev = bev / counts.clamp(min=1.0)
+        for oi in range(sub):
+            for oj in range(sub):
+                off_u = step * (oj + 0.5)
+                off_v = step * (oi + 0.5)
+                us = torch.arange(Wf, device=device, dtype=torch.float32) * s + off_u
+                vs = torch.arange(Hf, device=device, dtype=torch.float32) * s + off_v
+                d = depth.index_select(1, vs.long().clamp(max=depth.shape[1]-1)) \
+                         .index_select(2, us.long().clamp(max=depth.shape[2]-1))
 
-        return bev.reshape(B, Hb, Wb, C).permute(0, 3, 1, 2).contiguous()
+                fx_, fy_, cx_, cy_ = (K[:, i].view(B,1,1) for i in range(4))
+                x_cam = (us.view(1,1,Wf) - cx_) * d / fx_
+                y_cam = (vs.view(1,Hf,1) - cy_) * d / fy_
+                pts = torch.stack([x_cam.expand_as(d), y_cam.expand_as(d), d], 1).reshape(B,3,-1)
+
+                pts_v = torch.bmm(T[:, :3, :3], pts) + T[:, :3, 3:4]
+                x_v, y_v = pts_v[:, 0], pts_v[:, 1]
+
+                rows = torch.floor((x_v - cfg.x_min) / cfg.resolution).long()
+                cols = torch.floor((cfg.y_max - y_v) / cfg.resolution).long()
+                d_flat = d.reshape(B, -1)
+                valid = ((d_flat > 0) & torch.isfinite(d_flat)
+                         & (rows >= 0) & (rows < Hb)
+                         & (cols >= 0) & (cols < Wb)).reshape(-1)
+
+                N = rows.shape[1]
+                batch_idx = torch.arange(B, device=device).unsqueeze(1).expand(B, N)
+                lin = ((batch_idx * Hb + rows.clamp(0, Hb-1)) * Wb + cols.clamp(0, Wb-1)).reshape(-1)
+                idx = lin[valid]
+                bev.index_add_(0, idx, feats[valid])
+                counts.index_add_(0, idx, torch.ones(idx.shape[0], 1, device=device, dtype=bev.dtype))
+
+        bev = bev / counts.clamp(min=1.0)
+        bev = bev.reshape(B, Hb, Wb, C).permute(0, 3, 1, 2).contiguous()
+        occ = torch.log1p(counts).reshape(B, Hb, Wb, 1).permute(0, 3, 1, 2).contiguous()
+        return self.bev_proj(torch.cat([bev, occ], dim=1))
+
+        #ricordarsi di togliere codice morto sopra!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         
 
     def forward(self, images, depth, K, T) -> Dict[str, torch.Tensor]:
