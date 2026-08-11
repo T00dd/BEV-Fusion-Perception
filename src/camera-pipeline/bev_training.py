@@ -76,7 +76,7 @@ class BEVValidationAccumulator:
                 gt.append({
                     "color": c["color"],
                     "center_px": (col, row),
-                    "depth_m": float(np.hypot(c["x"])),
+                    "depth_m": float(c["x"]),
                     "fully_in_image": True,
                 })
  
@@ -106,13 +106,30 @@ from metrics import extract_peaks_from_heatmap
 
 _CLASS_COLORS = {0: "#2b6cb0", 1: "#d4a017", 2: "#dd6b20"}
 
-def _draw_bev_panel(ax, cones, cfg, title, gt_cones=None):
-    for r in range(10, int(cfg.x_max) + 1, 10):          #anelli di distanza
+def _draw_bev_panel(ax, cones, cfg, title, gt_cones=None, fov_params=None):
+    for r in range(10, int(cfg.x_max) + 1, 10):          # anelli di distanza
         ax.add_patch(plt.Circle((0, 0), r, fill=False, color="0.85", lw=0.8, zorder=0))
         ax.text(0, r, f"{r}m", color="0.55", fontsize=7, ha="center", va="bottom", zorder=1)
     ax.plot(0, 0, marker="^", color="0.15", markersize=11, zorder=6)   # veicolo
     
-    if gt_cones is not None:                             #gt in trasparenza (pannello pred)
+    #DISEGNO FOV TELECAMERA
+    if fov_params is not None:
+        cx, cy = fov_params["cam_x"], fov_params["cam_y"]
+        slope = fov_params["slope"]
+        
+        x_end = cfg.x_max
+        #+y sinistra 
+        #-y destra
+        y_left = cy + (x_end - cx) * slope
+        y_right = cy - (x_end - cx) * slope
+        
+        ax.plot([cy, y_left], [cx, x_end], color="lime", linestyle="--", linewidth=1.5, alpha=0.8, zorder=2)
+        ax.plot([cy, y_right], [cx, x_end], color="lime", linestyle="--", linewidth=1.5, alpha=0.8, zorder=2)
+        
+        #area visibile
+        ax.fill_betweenx([cx, x_end], [cy, y_right], [cy, y_left], color="lime", alpha=0.06, zorder=1)
+
+    if gt_cones is not None:                             # gt in trasparenza (pannello pred)
         for c in gt_cones:
             ax.scatter(c["y"], c["x"], s=110, facecolors="none", edgecolors=_CLASS_COLORS.get(c["cls"], "#808080"), linewidths=1.3, alpha=0.45, zorder=3)
                        
@@ -137,25 +154,33 @@ def save_bev_visualizations(pred_heatmap_logits, pred_offset, sample_ids,
     for i in range(min(max_to_save, probs.shape[0])):
         scene_id, frame_stem = sample_ids[i].split("/")
 
-        # GT: posizioni vere dei coni dai label CARLA (in grid)
         labels_path = Path(cfg.dataset_root) / "scenes" / scene_id / "labels" / f"{frame_stem}.json"
         calib_path = Path(cfg.dataset_root) / "scenes" / scene_id / "calib.yaml"
         
-        # Carichiamo la calibrazione per il filtro FOV
+        #carichiamo la calibrazione per estrarre i parametri del fov
         calib = load_calib(calib_path)
+        
+        #pendenza: tan(theta) = cx / fx
+        fov_slope = calib["K"][2] / calib["K"][0] 
+        #posizione della telecamera nel frame bev
+        cam_x = float(calib["T"][0, 3])
+        cam_y = float(calib["T"][1, 3])
+        
+        fov_params = {
+            "cam_x": cam_x,
+            "cam_y": cam_y,
+            "slope": float(fov_slope)
+        }
 
+        #carichiamo tutti i coni
         gt_cones = []
         for c in load_cones_3d(labels_path):
-            # Filtra i coni fantasma anche nella visualizzazione!
-            if not cone_visible(c, calib):
-                continue
-
             cls = COLOR_TO_CLASS.get(c["color"])
             row, col = world_to_grid(c["x"], c["y"], cfg)
             if cls is not None and 0 <= row < cfg.bev_H and 0 <= col < cfg.bev_W:
                 gt_cones.append({"x": c["x"], "y": c["y"], "cls": cls})
 
-        # Pred: picchi estratti (stesse detection della validation) -> metri
+        #pred: picchi estratti (stesse detection della validation) -> metri
         dets = extract_peaks_from_heatmap(
             probs[i].cpu(), pred_offset[i].cpu(), stride=1, threshold=cfg.detection_threshold
         )
@@ -165,13 +190,16 @@ def save_bev_visualizations(pred_heatmap_logits, pred_offset, sample_ids,
             pred_cones.append({"x": x, "y": y, "cls": d["class_id"]})
 
         fig, axs = plt.subplots(1, 2, figsize=(11, 6.5))
-        _draw_bev_panel(axs[0], gt_cones, cfg, "BEV GT (posizioni CARLA)")
-        _draw_bev_panel(axs[1], pred_cones, cfg, "BEV pred (GT in trasparenza)", gt_cones=gt_cones)
+    
+        _draw_bev_panel(axs[0], gt_cones, cfg, "BEV GT (Tutti i coni)", fov_params=fov_params)
+        _draw_bev_panel(axs[1], pred_cones, cfg, "BEV pred (GT in trasparenza)", gt_cones=gt_cones, fov_params=fov_params)
+        
         fig.suptitle(f"{sample_ids[i]}  -  epoch {epoch:03d}", fontsize=11)
         fig.tight_layout()
         fig.savefig(output_dir / f"{sample_ids[i].replace('/', '_')}.png",
                     dpi=110, bbox_inches="tight")
         plt.close(fig)
+        
 
 #SETUP AND DATA LOADER-------------------------------------------------------------
 
