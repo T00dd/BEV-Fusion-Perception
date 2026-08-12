@@ -52,7 +52,8 @@ class BEVValidationAccumulator:
         for b in range(probs.shape[0]):
             detections = extract_peaks_from_heatmap(
                 probs[b].cpu(), offset_pred[b].cpu(),
-                stride=1, threshold=cfg.detection_threshold,
+                stride=1, threshold=cfg.detection_threshold_val,
+                max_detections=300,
             )
  
             scene_id, frame_stem = sample_ids[b].split("/")
@@ -523,8 +524,8 @@ def main():
             if cfg.use_wandb:
                 wandb.log(epoch_summary, step=global_step)
  
-            if val_metrics.get("val_f1", 0.0) > best_val_f1:
-                best_val_f1 = val_metrics["val_f1"]
+            if val_metrics.get("val_ap", 0.0) > best_val_ap:
+                best_val_ap = val_metrics["val_ap"]
                 save_checkpoint(model, optimizer, scheduler, epoch, cfg, "best_model.pth")
                 save_camera_branch(model, cfg, "camera_branch.pth")
         else:
@@ -538,7 +539,7 @@ def main():
  
     logger.close()
     print("\n[Done] Training BEV completato.")
-    print(f"Best val F1: {best_val_f1:.4f}")
+    print(f"Best val AP: {best_val_ap:.4f}")
     print(f"Deliverable per la fusione: {cfg.models_dir}/camera_branch.pth")
 
     if cfg.use_wandb:

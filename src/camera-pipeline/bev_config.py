@@ -68,13 +68,13 @@ class BEVConfig:
     focal_beta: float = 4.0
 
     #training
-    num_epochs: int = 30
+    num_epochs: int = 15
     batch_size: int = 16
     num_workers: int = 12
     backbone_lr: float = 2e-5
     head_lr: float = 6e-4
     weight_decay: float = 1e-4
-    warmup_epochs: int = 3
+    warmup_epochs: int = 2
 
     lift_subsamples: int = 2
 
