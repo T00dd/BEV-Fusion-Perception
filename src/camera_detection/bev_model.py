@@ -63,7 +63,7 @@ class CameraBEVNet(nn.Module):
             print(f"[BEV] Warning: Unexpected keys in backbone state_dict: {unexpected}")
 
     
-    def lift_to_bev(self, features_map, depth, K, T):
+    def lift_to_bev(self, features_map, depth, K, T, return_counts=False):
 
         # feature_map (B, C, Hf, Wf) B=batch size, C=channels, Hf=height feature map, Wf=width feature map
         # depth (B, H, W) B=batch size, H=height image, W=width image
@@ -130,8 +130,11 @@ class CameraBEVNet(nn.Module):
 
         bev = bev / counts.clamp(min=1.0)
         bev = bev.reshape(B, Hb, Wb, C).permute(0, 3, 1, 2).contiguous()
-        occ = torch.log1p(counts).reshape(B, Hb, Wb, 1).permute(0, 3, 1, 2).contiguous()
-        return self.bev_proj(torch.cat([bev, occ], dim=1))
+        counts = counts.reshape(B, Hb, Wb, 1).permute(0, 3, 1, 2).contiguous()
+        bev = self.bev_proj(torch.cat([bev, torch.log1p(counts)], dim=1))
+        if return_counts:
+            return bev, counts
+        return bev
         
 
     def forward(self, images, depth, K, T) -> Dict[str, torch.Tensor]:
