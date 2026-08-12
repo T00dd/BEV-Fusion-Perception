@@ -251,11 +251,17 @@ class SyncSensorRig:
         return calib
 
     def destroy(self):
+        # Step 1: stop listening to all sensors, so the queues stop filling up and we can drain them
         for s in self.sensors.values():
             try:
                 s.stop()
             except Exception:
                 pass
+
+        time.sleep(0.05)
+
+        # Step 2: destroy carla actors and clear queues
+        for s in self.sensors.values():
             try:
                 s.destroy()
             except Exception:

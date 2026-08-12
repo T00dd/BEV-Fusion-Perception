@@ -1,0 +1,78 @@
+DATASET: 'ConeDataset'
+
+DATA_PATH: '/workspace/BEV-fusion-sw/carla_dataset_three_classses'
+
+POINT_CLOUD_RANGE: [0, -25, -3, 50, 25, 1]
+
+DATA_SPLIT:
+  train: train
+  test: val            # sviluppo/selezione; per il numero finale usa il test-config (test: test)
+
+INFO_PATH:
+  train: [cone_infos_train.pkl]
+  test: [cone_infos_val.pkl]
+
+# ---------------------------------------------------------------------------
+# CLASS-AGNOSTIC + DOMAIN RANDOMIZATION (run "noise", indurimento sim-to-real)
+# ---------------------------------------------------------------------------
+MERGE_CLASSES_TO: 'cone'
+
+MAP_CLASS_TO_KITTI: {
+  'cone': 'Pedestrian'
+}
+
+GET_ITEM_LIST: [
+  "points"
+]
+FOV_POINTS_ONLY: False
+
+# soglia scelta (train@2): recupera i coni a 2 punti a costo nullo sui densi
+MIN_POINTS_FOR_GT: 2
+
+# --- rumore per-punto, SOLO in training (gestito da ConeDataset._augment_points) ---
+# jitter = il fix del fallimento critico del robustness probe (precisione che crollava
+# a 1-3 cm di rumore); dropout = robustezza alla densita'; clutter = insegna a rifiutare
+# i sosia cono-like (migliora la precisione sul clutter reale).
+NOISE_AUG:
+  ENABLED: True
+  JITTER_STD_MAX: 0.03      # sigma per-frame ~ U(0, 3 cm), gaussiano per-punto su x,y,z
+  DROP_MAX: 0.3             # frazione punti tolti per-frame ~ U(0, 0.3)
+  CLUTTER_MAX: 12           # n cluster spuri cono-like per-frame ~ U(0, 12), NON etichettati
+
+POINT_FEATURE_ENCODING: {
+  encoding_type: absolute_coordinates_encoding,
+  used_feature_list: ['x', 'y', 'z', 'intensity'],
+  src_feature_list: ['x', 'y', 'z', 'intensity'],
+}
+
+DATA_PROCESSOR:
+  - NAME: mask_points_and_boxes_outside_range
+    REMOVE_OUTSIDE_BOXES: True
+
+  - NAME: shuffle_points
+    SHUFFLE_ENABLED: {
+      'train': True,
+      'test': False
+    }
+
+  - NAME: transform_points_to_voxels
+    VOXEL_SIZE: [0.05, 0.05, 0.1]
+    MAX_POINTS_PER_VOXEL: 10
+    MAX_NUMBER_OF_VOXELS: {
+      'train': 30000,
+      'test': 45000,
+    }
+
+DATA_AUGMENTOR:
+  DISABLE_AUG_LIST: ['placeholder']
+  AUG_CONFIG_LIST:
+    # gt_sampling OFF: scartato (precisione giu', nessun guadagno) e in contrasto con
+    # l'apprendimento del rifiuto del clutter. Restano le trasformazioni globali.
+    - NAME: random_world_flip
+      ALONG_AXIS_LIST: ['x']
+
+    - NAME: random_world_rotation
+      WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+
+    - NAME: random_world_scaling
+      WORLD_SCALE_RANGE: [0.95, 1.05]

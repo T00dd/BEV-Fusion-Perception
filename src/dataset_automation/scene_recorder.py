@@ -318,12 +318,18 @@ def record_scene(client, world, scene_id, scene_dir, condition, cfg, logger,
 
         tick = 0
         while frames_written < max_frames:
-            vehicle.apply_control(controller.step(vehicle))
+            control = controller.step(vehicle)
+            vehicle.apply_control(control)
             world.tick()
             tick += 1
 
             if controller.reached_end:
                 logger.info(f"[{scene_id}] car reached end of track")
+                # do a small drain before exiting to avoid msgpack errors on the last frame
+                try:
+                    frame_id = world.get_snapshot().frame
+                except Exception:
+                    pass
                 break
             if tick % every != 0:
                 continue
