@@ -91,7 +91,7 @@ class BEVConfig:
     save_visualizations: bool = True
     num_visualizations_per_val: int = 8
     detection_threshold: float = 0.2
-    detection_threshold_val: float = 0.05
+    detection_threshold_val: float = 0.2
     match_radius_m: float = 0.5
 
     grad_clip_norm: float = 1.0
