@@ -33,3 +33,6 @@ results/
 intensity_cache/
 dataset_analysis/
 dataset_stats/
+
+DS_Store
+.DS_Store
