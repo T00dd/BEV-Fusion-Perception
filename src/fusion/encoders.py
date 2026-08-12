@@ -52,6 +52,7 @@ class LidarEncoder(FrozenEncoder):
         logger=None,
     ):
         super().__init__()
+        import lidar_detection.datasets
         from pcdet.config import cfg as pcdet_cfg, cfg_from_yaml_file
         from pcdet.models import build_network
         from pcdet.utils import common_utils
