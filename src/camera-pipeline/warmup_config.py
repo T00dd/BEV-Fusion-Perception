@@ -1,0 +1,88 @@
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Tuple
+
+
+@dataclass
+class WarmupConfig:
+    #path
+    dataset_root: Path = Path("../../carla_dataset_three_classses")  #DAMODIFICARE QUANDO ABBIAMO IL DATASET
+    output_dir: Path = Path("./checkpoints/warmup")
+    models_dir: Path = Path("../models")
+    
+    #dataset
+    image_size: Tuple[int, int] = (640, 640)
+    train_split_file: str = "splits/train.txt"
+    val_split_file: str = "splits/val.txt"
+    
+    #heatmap 2d gt
+    #HRNet-W32 branch ad alta risoluzione a stride 4
+    heatmap_stride: int = 4
+    
+    #sigma adattivo della gaussiana per generare i picchi nella heatmap (unita' di feature map)
+    gaussian_sigma: float = 2.0
+    sigma_ref_depth_m: float = 10.0   # a questa distanza sigma == gaussian_sigma
+    sigma_min: float = 0.8            # coni lontani: picco stretto
+    sigma_max: float = 4.0            # coni vicini: picco ampio
+    
+    #modello
+    backbone_name: str = "hrnet_w32.ms_in1k"
+
+    feature_index: int = 1  #feature map a stride 4
+    
+    #numero di classi per la detection 2d: blu, giallo, arancione
+    num_classes: int = 3
+    
+    #head di detection 2d
+    head_hidden_channels: int = 64
+    head_num_layers: int = 3
+    
+    #loss
+    #pesi nella loss combinata
+    focal_loss_weight: float = 1.0
+    offset_loss_weight: float = 0.1  #L1 loss su offset sub-pixel
+    
+    #parametri focal loss (CenterNet-style)
+    focal_alpha: float = 2.0
+    focal_beta: float = 4.0
+    
+    #training
+    num_epochs: int = 30
+    batch_size: int = 32
+    num_workers: int = 12
+    
+    #learning rate differenziato: basso sul backbone, alto sulla head
+    backbone_lr: float = 2e-5
+    head_lr: float = 6e-4
+    weight_decay: float = 1e-4
+    
+    #scheduler
+    warmup_epochs: int = 3  # warmup lineare del lr nelle prime epoche
+    
+    #augmentation
+
+    color_jitter_brightness: float = 0.3
+    color_jitter_contrast: float = 0.3
+    color_jitter_saturation: float = 0.3
+    color_jitter_hue: float = 0.05
+    gaussian_noise_std: float = 0.01
+    
+    
+    #Validation / Logging
+    val_every_n_epochs: int = 1
+    log_every_n_steps: int = 50
+    save_visualizations: bool = True
+    num_visualizations_per_val: int = 8
+
+    grad_clip_norm: float = 1.0
+
+    seed: int = 14
+    
+    def __post_init__(self):
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+
+    #wandb for monitoring
+    use_wandb: bool = True
+    wandb_project: str = "HRNet-2D-Cone-Detection"
+    wandb_run_name: str = "warmup-run-01"
