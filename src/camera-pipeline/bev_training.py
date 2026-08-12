@@ -504,7 +504,7 @@ def main():
         global_step = start_epoch * len(train_loader)
         print(f"[Resume] Restarting from epoch {start_epoch}")
  
-    best_val_f1 = 0.0
+    best_val_ap = 0.0
     for epoch in range(start_epoch, cfg.num_epochs):
         print(f"\n============ Epoch {epoch}/{cfg.num_epochs} ============")
  
