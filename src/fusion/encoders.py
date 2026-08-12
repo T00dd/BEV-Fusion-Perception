@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -20,7 +20,6 @@ class FrozenEncoder(nn.Module):
         return self
 
     def train(self, mode: bool = True) -> "FrozenEncoder":
-        # avoid re-activating bathcnorm in a frozen encoder
         return super().train(False)
 
     @torch.no_grad()
@@ -35,8 +34,8 @@ class FrozenEncoder(nn.Module):
             )
         if tuple(feat.shape[-2:]) != expected_shape:
             raise RuntimeError(
-                f"{type(self).__name__}: expected spatial shape {expected_shape}, "
-                f"received {tuple(feat.shape[-2:])}. Check VOXEL_SIZE / "
+                f"{type(self).__name__}: expected shape {expected_shape}, "
+                f"received {tuple(feat.shape[-2:])}. check VOXEL_SIZE / "
                 f"UPSAMPLE_STRIDES in config, or resolution in GridSpec."
             )
         return feat
@@ -52,7 +51,6 @@ class LidarEncoder(FrozenEncoder):
         logger=None,
     ):
         super().__init__()
-        import lidar_detection.datasets
         from pcdet.config import cfg as pcdet_cfg, cfg_from_yaml_file
         from pcdet.models import build_network
         from pcdet.utils import common_utils
@@ -73,7 +71,6 @@ class LidarEncoder(FrozenEncoder):
 
     @staticmethod
     def _infer_out_channels(pcdet_cfg) -> int:
-        
         bb = pcdet_cfg.MODEL.BACKBONE_2D
         if "NUM_UPSAMPLE_FILTERS" in bb:
             return int(sum(bb.NUM_UPSAMPLE_FILTERS))
@@ -81,14 +78,13 @@ class LidarEncoder(FrozenEncoder):
 
     @torch.no_grad()
     def forward(self, batch_dict: Dict) -> torch.Tensor:
-        
         for module in self.net.module_list:
             batch_dict = module(batch_dict)
             if "spatial_features_2d" in batch_dict:
                 break
         else:
             raise RuntimeError(
-                "spatial_features_2d not generated: config does not contain a 2D backbone?"
+                "spatial_features_2d not produced: config may not include a 2D backbone, or the model is not a SECOND variant"
             )
 
         feat = batch_dict["spatial_features_2d"]
@@ -96,7 +92,6 @@ class LidarEncoder(FrozenEncoder):
 
 
 class CameraEncoder(FrozenEncoder):
-
     def __init__(
         self,
         cfg,
@@ -118,7 +113,6 @@ class CameraEncoder(FrozenEncoder):
 
     @staticmethod
     def _grid_from_cfg(cfg, fallback: GridSpec) -> GridSpec:
-
         derived = GridSpec(
             x_min=cfg.x_min, x_max=cfg.x_max,
             y_min=cfg.y_min, y_max=cfg.y_max,
@@ -133,20 +127,19 @@ class CameraEncoder(FrozenEncoder):
 
     def _load_checkpoint(self, path: Path, map_location: str):
         if not path.is_file():
-            raise FileNotFoundError(f"camera checkpoint not found: {path}")
+            raise FileNotFoundError(f"checkpoint camera non trovato: {path}")
         state = torch.load(path, map_location=map_location)
         state = state.get("model_state_dict", state.get("state_dict", state))
         missing, unexpected = self.net.load_state_dict(state, strict=False)
         if missing:
-            raise RuntimeError(f"missing keys in camera checkpoint: {missing}")
+            raise RuntimeError(f"chiavi mancanti nel checkpoint camera: {missing}")
         if unexpected:
-            print(f"[CameraEncoder] unexpected keys: {unexpected}")
+            print(f"[CameraEncoder] chiavi ignorate: {unexpected}")
 
     @torch.no_grad()
-    def forward(self, batch: Dict) -> torch.Tensor:
-
+    def forward(self, batch: Dict) -> Tuple[torch.Tensor, torch.Tensor]:
         feature_map = self.net.backbone(batch["images"])[0]
-        bev = self.net.lift_to_bev(
-            feature_map, batch["depth"], batch["K"], batch["T"]
+        bev, counts = self.net.lift_to_bev(
+            feature_map, batch["depth"], batch["K"], batch["T"], return_counts=True
         )
-        return self.check_output(bev, self.grid.camera_shape)
+        return self.check_output(bev, self.grid.camera_shape), counts

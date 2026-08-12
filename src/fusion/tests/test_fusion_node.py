@@ -1,3 +1,8 @@
+"""Fusion node tests: the identity guarantee, gate behaviour, wiring.
+
+    python -m pytest fusion/tests/test_fusion_node.py -v
+"""
+
 import pytest
 import torch
 import torch.nn as nn
@@ -14,7 +19,6 @@ def make_inputs(cfg=FusionConfig(), b=2):
         torch.rand(b, cfg.lidar_priors, H, W),
         torch.rand(b, cfg.camera_priors, H, W),
     )
-
 
 def test_output_is_bit_identical_to_lidar_at_init():
 
@@ -178,5 +182,5 @@ def test_parameter_budget():
     node = FusionNode()
     total = sum(p.numel() for p in node.parameters())
     context = sum(p.numel() for p in node.context.parameters())
-    assert total == 387_521, f"unexpected budget: {total}"
+    assert total == 387_681, f"unexpected budget: {total}"
     assert context / total > 0.7, "context conv should dominate the budget"

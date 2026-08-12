@@ -1,6 +1,11 @@
+"""Prior tests: scatter correctness, normalisation bounds, frustum geometry.
+
+    python -m pytest fusion/tests/test_priors.py -v
+"""
+
 import torch
 
-from fusion.grid_alignment import FUSION_GRID
+from fusion.grid_alignment import CAMERA_GRID, FUSION_GRID
 from fusion.priors import (
     CameraPriorConfig,
     CameraPriors,
@@ -54,13 +59,12 @@ def test_out_of_range_points_are_dropped():
     out = lidar_priors(pts, batch_size=1)
     assert out[0, 0].sum() == 0.0
 
-
 def identity_T(b=1):
 
     T = torch.zeros(b, 4, 4)
-    T[:, 0, 2] = 1.0
-    T[:, 1, 0] = -1.0
-    T[:, 2, 1] = -1.0
+    T[:, 0, 2] = 1.0    # camera z (forward) -> vehicle x
+    T[:, 1, 0] = -1.0   # camera x (right)   -> vehicle -y
+    T[:, 2, 1] = -1.0   # camera y (down)    -> vehicle -z
     T[:, 3, 3] = 1.0
     return T
 
@@ -68,9 +72,22 @@ def identity_T(b=1):
 def test_camera_priors_shape_and_bounds():
     p = CameraPriors(CAM)
     K = torch.tensor([[700.0, 700.0, 640.0, 360.0]])
-    out = p(K, identity_T())
-    assert out.shape == (1, 3, *FUSION_GRID.camera_shape)
+    counts = torch.randint(0, 20, (1, 1, *CAMERA_GRID.camera_shape)).float()
+    out = p(K, identity_T(), counts)
+    assert out.shape == (1, 4, *FUSION_GRID.camera_shape)
     assert out.min() >= 0.0 and out.max() <= 1.0
+
+
+def test_camera_occupancy_preserves_empty_cells():
+
+    p = CameraPriors(CAM)
+    counts = torch.zeros(1, 1, *CAMERA_GRID.camera_shape)
+    counts[0, 0, 100, 100] = 30.0
+
+    occ = p.occupancy(counts)
+    assert occ.shape == (1, 1, *FUSION_GRID.camera_shape)
+    assert torch.all((occ == 0) | (occ == occ.max())), "nearest must stay two-valued"
+    assert 0.0 < occ.max().item() <= 1.0
 
 
 def test_raw_depth_error_grows_quadratically():
