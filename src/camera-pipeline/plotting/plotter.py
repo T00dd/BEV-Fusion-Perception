@@ -100,7 +100,7 @@ def plot_training_results(step_csv, epoch_csv, output_dir="plots"):
         plt.plot(val_df['epoch'], val_df['val_tp'], label='True Positives (TP)', marker='o', color='tab:green')
         plt.plot(val_df['epoch'], val_df['val_fp'], label='False Positives (FP)', marker='x', color='tab:red')
         plt.plot(val_df['epoch'], val_df['val_fn'], label='False Negatives (FN)', marker='s', color='tab:orange')
-        
+        plt.yscale('log')
         plt.title('Validation Detections Count')
         plt.xlabel('Epoch')
         plt.ylabel('Number of Objects')
