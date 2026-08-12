@@ -73,7 +73,7 @@ def test_running_stats_non_si_muovono():
 
 def test_check_output_su_canali_sbagliati():
     enc = DummyEncoder(channels=8)
-    with pytest.raises(RuntimeError, match="canali"):
+    with pytest.raises(RuntimeError, match="channels"):
         enc.check_output(torch.zeros(1, 16, 250, 250), LIDAR_GRID.lidar_shape)
 
 
