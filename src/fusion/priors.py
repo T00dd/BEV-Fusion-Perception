@@ -18,8 +18,8 @@ N_CAMERA_PRIORS = 4
 class LidarPriorConfig:
     z_min: float = -3.0
     z_max: float = 1.0
-    count_scale: float = 4.0
-    spread_scale: float = 4.0
+    count_scale: float = 3.0
+    spread_scale: float = 1.4
     intensity_scale: float = 1.0
 
 
@@ -31,7 +31,7 @@ class CameraPriorConfig:
     image_height: int
     disparity_error_px: float = 0.5
     depth_error_scale: float = 1.0
-    count_scale: float = 4.0
+    count_scale: float = 5.4
 
 # lidar priors
 
