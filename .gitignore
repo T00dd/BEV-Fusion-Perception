@@ -36,3 +36,5 @@ dataset_stats/
 
 DS_Store
 .DS_Store
+
+tests/
