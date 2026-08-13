@@ -146,10 +146,12 @@ class CameraPriors(nn.Module):
         return (torch.log1p(counts.float()) / self.cfg.count_scale).clamp(0.0, 1.0)
 
     @torch.no_grad()
-    def forward(self, K: torch.Tensor, T: torch.Tensor, counts: torch.Tensor) -> torch.Tensor:
-
+    def forward(
+        self, K: torch.Tensor, T: torch.Tensor, counts: torch.Tensor) -> torch.Tensor:
+        
         B = T.shape[0]
         mask = self.frustum_mask(K, T)
         rng = self.range_norm.unsqueeze(0).expand(B, -1, -1)
         err = self.depth_err_norm.unsqueeze(0).expand(B, -1, -1)
-        return torch.stack([mask, rng, err], dim=1).contiguous()
+        occ = self.occupancy(counts)[:, 0]
+        return torch.stack([mask, rng, err, occ], dim=1).contiguous()

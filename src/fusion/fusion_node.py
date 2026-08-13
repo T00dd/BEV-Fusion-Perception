@@ -14,7 +14,7 @@ class FusionConfig:
     lidar_channels: int = 256
     camera_channels: int = 128
     lidar_priors: int = 4
-    camera_priors: int = 3
+    camera_priors: int = 4
     hidden_channels: int = 128
     gate_channels: int = 32
     gate_bias: float = 2.0
