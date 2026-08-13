@@ -8,6 +8,23 @@ from .grid_alignment import CAMERA_GRID, LIDAR_GRID, GridSpec
 
 __all__ = ["FrozenEncoder", "LidarEncoder", "CameraEncoder"]
 
+from contextlib import contextmanager
+
+# for pytorch 2.6+
+@contextmanager
+def _allow_full_unpickle():
+
+    original = torch.load
+
+    def patched(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return original(*args, **kwargs)
+
+    torch.load = patched
+    try:
+        yield
+    finally:
+        torch.load = original
 
 class FrozenEncoder(nn.Module):
 
@@ -63,11 +80,13 @@ class LidarEncoder(FrozenEncoder):
             num_class=len(pcdet_cfg.CLASS_NAMES),
             dataset=dataset,
         )
-        self.net.load_params_from_file(str(ckpt_file), logger=logger, to_cpu=True)
+        with _allow_full_unpickle():
+            self.net.load_params_from_file(str(ckpt_file), logger=logger, to_cpu=True)
 
         self.grid = grid
         self.out_channels = self._infer_out_channels(pcdet_cfg)
         self.freeze()
+
 
     @staticmethod
     def _infer_out_channels(pcdet_cfg) -> int:
@@ -128,7 +147,7 @@ class CameraEncoder(FrozenEncoder):
     def _load_checkpoint(self, path: Path, map_location: str):
         if not path.is_file():
             raise FileNotFoundError(f"checkpoint camera non trovato: {path}")
-        state = torch.load(path, map_location=map_location)
+        state = torch.load(path, map_location=map_location, weights_only=False)
         state = state.get("model_state_dict", state.get("state_dict", state))
         missing, unexpected = self.net.load_state_dict(state, strict=False)
         if missing:
