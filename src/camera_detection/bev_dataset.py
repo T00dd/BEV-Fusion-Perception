@@ -11,8 +11,8 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
  
-from dataset import IMAGENET_MEAN, IMAGENET_STD, gaussian_2d  #riuso del warmup
-from stereo_depth import compute_depth_from_stereo
+from .dataset import IMAGENET_MEAN, IMAGENET_STD, gaussian_2d  #riuso del warmup
+from .stereo_depth import compute_depth_from_stereo
 
 
 COLOR_TO_CLASS = {"blue": 0, "yellow": 1, "orange_small": 2}

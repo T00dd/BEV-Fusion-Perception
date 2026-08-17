@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-__all__ = ["FusionConfig"]
+__all__ = ["FusionTrainConfig"]
 
 
 @dataclass
-class FusionConfig:
+class FusionTrainConfig:
 
     # "phase0": geometry only, fusion frozen at delta = 0
     # "phase1": fusion released, colour enabled
@@ -19,6 +19,7 @@ class FusionConfig:
     dataset_root: Path = Path("../../dataset")
     output_dir: Path = Path("./checkpoints/fusion")
     lidar_cfg_file: Path = Path("../lidar_detection/cfgs/cone_centerpoint.yaml")
+    camera_cfg: Optional[object] = None   #BEVConfig; default costruito in main()
     lidar_checkpoint: Path = Path("../models/lidar_encoder.pth")
     camera_checkpoint: Path = Path("../models/camera_bev.pth")
     train_split_file: str = "splits/train.txt"

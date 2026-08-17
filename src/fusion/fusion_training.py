@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from camera_detection.logger import TrainingLogger  #riusato invariato
 
 from .bev_metrics import (BEVValidationAccumulator, compare_to_baseline, save_baseline)
-from .fusion_config import FusionConfig
+from .fusion_config import FusionTrainConfig
 from .fusion_dataset import FusionDataset, collate_fusion
 from .head import FusionHead, FusionHeadConfig
 from .head_loss import FusionLoss, FusionLossConfig
@@ -131,7 +131,16 @@ def validate(backbone, head, loader, accumulator, device, n_gate_bins=10):
     return out
 
 
-def run_test_split(backbone, head, cfg, device, out_dir, val_metrics):
+def make_dataset(cfg, split_file: str, lidar_processor):
+    from .fusion_dataset import FusionDatasetConfig
+    return FusionDataset(
+        FusionDatasetConfig(dataset_root=cfg.dataset_root, split_file=split_file,
+                            image_size=cfg.image_size),
+        lidar_processor,
+    )
+
+
+def run_test_split(backbone, head, cfg, device, out_dir, val_metrics, lidar_processor):
     #il test si fa sul checkpoint MIGLIORE, non sui pesi dell'ultima epoca
     best = out_dir / f"{cfg.phase}_best.pth"
     if not best.exists():
@@ -147,7 +156,7 @@ def run_test_split(backbone, head, cfg, device, out_dir, val_metrics):
     head.load_state_dict(ckpt["head"])
 
     loader = DataLoader(
-        FusionDataset(cfg.dataset_root, cfg.test_split_file, training=False),
+        make_dataset(cfg, cfg.test_split_file, lidar_processor),
         batch_size=cfg.batch_size, num_workers=cfg.num_workers,
         collate_fn=collate_fusion, shuffle=False, pin_memory=True)
     acc = BEVValidationAccumulator(backbone.grid, cfg.detection_threshold,
@@ -172,9 +181,12 @@ def run_test_split(backbone, head, cfg, device, out_dir, val_metrics):
     return m
 
 
-def main(cfg: FusionConfig):
-    from .encoders import build_camera_encoder, build_lidar_encoder
+def main(cfg: FusionTrainConfig):
+    from camera_detection.bev_config import BEVConfig
+
+    from .encoders import CameraEncoder, LidarEncoder
     from .fusion_backbone import FusionBackbone, FusionBackboneConfig
+    from .fusion_dataset import FusionDatasetConfig, LidarPointProcessor
     from .priors import CameraPriorConfig
 
     torch.manual_seed(cfg.seed)
@@ -188,10 +200,16 @@ def main(cfg: FusionConfig):
     if cfg.phase != "phase0" and cfg.resume_from is None:
         raise RuntimeError(f"{cfg.phase} deve partire da un checkpoint (--resume-from)")
 
+    #LidarPointProcessor espone class_names, grid_size, voxel_size,
+    #point_cloud_range e num_point_features: e' esattamente l'interfaccia che
+    #build_network di OpenPCDet si aspetta come "dataset"
+    lidar_processor = LidarPointProcessor(cfg.lidar_cfg_file, training=False)
+    camera_cfg = cfg.camera_cfg or BEVConfig()
+
     backbone = FusionBackbone(
-        build_lidar_encoder(cfg.lidar_cfg_file, cfg.lidar_checkpoint),
-        build_camera_encoder(cfg.camera_checkpoint),
-        FusionBackboneConfig(camera_prior=CameraPriorConfig()),
+        LidarEncoder(cfg.lidar_cfg_file, cfg.lidar_checkpoint, lidar_processor),
+        CameraEncoder(camera_cfg, cfg.camera_checkpoint),
+        FusionBackboneConfig(camera_prior=CameraPriorConfig(fx=cfg.fx, baseline=cfg.baseline, image_width=cfg.image_size[1], image_height=cfg.image_size[0])),
     ).to(device)
     head = FusionHead(FusionHeadConfig(in_channels=backbone.out_channels)).to(device)
 
@@ -264,7 +282,7 @@ def main(cfg: FusionConfig):
         save_baseline(last_val, accumulator.instance_hit, baseline_path)
         print(f"baseline B salvata in {baseline_path}")
     print(f"fine training. best F1 in validation {best_f1:.4f}")
-    run_test_split(backbone, head, cfg, device, out_dir, last_val)
+    run_test_split(backbone, head, cfg, device, out_dir, last_val, lidar_processor)
 
 
 if __name__ == "__main__":
@@ -275,7 +293,7 @@ if __name__ == "__main__":
     p.add_argument("--epochs", type=int, default=None)
     a = p.parse_args()
 
-    cfg = FusionConfig(phase=a.phase, resume_from=a.resume_from, allow_encoder_finetune=a.allow_encoder_finetune)
+    cfg = FusionTrainConfig(phase=a.phase, resume_from=a.resume_from, allow_encoder_finetune=a.allow_encoder_finetune)
     if a.epochs is not None:
         cfg.num_epochs = a.epochs
     main(cfg)
