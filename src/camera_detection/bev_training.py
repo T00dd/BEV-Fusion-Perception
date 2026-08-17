@@ -4,6 +4,7 @@ import random
 from pathlib import Path
 from typing import Dict, List
 import wandb
+import json
  
 import numpy as np
 import torch
@@ -274,17 +275,17 @@ def build_dataloaders(cfg: BEVConfig):
 
     train_dataset = BEVDataset(cfg, cfg.train_split_file, augment=True, color_jitter_params=color_jitter_params)
     val_dataset = BEVDataset(cfg, cfg.val_split_file, augment=False)
+    test_dataset = BEVDataset(cfg, cfg.test_split_file, augment=False)
  
-    print(f"Train: {len(train_dataset)} sample, Val: {len(val_dataset)} sample")
+    print(f"Train: {len(train_dataset)} sample, Val: {len(val_dataset)} sample, Test: {len(test_dataset)} sample")
     print(f"Griglia BEV: {cfg.bev_H}x{cfg.bev_W} celle @ {cfg.resolution} m, "
           f"x [{cfg.x_min},{cfg.x_max}]m, y [{cfg.y_min},{cfg.y_max}]m")
  
-    train_loader = DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers, pin_memory=True, drop_last=True,
-                              persistent_workers=cfg.num_workers > 0)
-    val_loader = DataLoader(val_dataset, batch_size=cfg.batch_size, shuffle=False,
-                            num_workers=cfg.num_workers, pin_memory=True,
-                            persistent_workers=cfg.num_workers > 0)
-    return train_loader, val_loader
+    train_loader = DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers, pin_memory=True, drop_last=True, persistent_workers=cfg.num_workers > 0)
+    val_loader = DataLoader(val_dataset, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers, pin_memory=True, persistent_workers=cfg.num_workers > 0)
+    test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False,num_workers=cfg.num_workers, pin_memory=True,)
+
+    return train_loader, val_loader, test_loader
  
  
 def build_scheduler(optimizer, cfg: BEVConfig, steps_per_epoch: int):
@@ -315,7 +316,7 @@ def to_device(batch, device):
     return inputs, targets
 
 
-#TRAIN AND VALIDATION---------------------------------------------------------------------
+#TRAIN, VALIDATION, TEST---------------------------------------------------------------------
 
 
 def train_one_epoch(model, loader, optimizer, scheduler, loss_fn, cfg,
@@ -404,6 +405,62 @@ def validate(model, loader, loss_fn, val_accumulator, cfg, epoch):
     return result
 
 
+@torch.no_grad()
+def test(model, loader, loss_fn, cfg, checkpoint_path=None):
+    
+    #valutazione finale sul test split
+
+    if checkpoint_path is not None and Path(checkpoint_path).is_file():
+        print(f"[Test] Carico il best checkpoint: {checkpoint_path}")
+        state = torch.load(checkpoint_path, map_location="cuda")
+        model.load_state_dict(state["model_state_dict"])
+        print(f"[Test] Checkpoint dell'epoca {state['epoch']}")
+    else:
+        print("[Test] Nessun checkpoint trovato, uso i pesi finali")
+
+    model.eval()
+    accumulator = BEVValidationAccumulator(cfg)
+    accumulator.reset()
+
+    sum_losses = {"loss_total": 0.0, "loss_focal": 0.0, "loss_offset": 0.0}
+    num_batches = 0
+
+    for batch in loader:
+        inputs, targets = to_device(batch, "cuda")
+
+        with autocast(device_type="cuda", dtype=torch.bfloat16):
+            predictions = model(*inputs)
+            _, log_dict = loss_fn(predictions, targets)
+
+        for k, v in log_dict.items():
+            sum_losses[k] += v
+        num_batches += 1
+
+        accumulator.update(predictions["heatmap_logits"].float(), predictions["offset_pred"].float(), batch["sample_id"])
+
+    for k in sum_losses:
+        sum_losses[k] /= max(num_batches, 1)
+
+    metrics = {f"test_{k}": v for k, v in sum_losses.items()}
+    metrics.update({f"test_{k}": v for k, v in accumulator.compute().items()})
+
+    if cfg.save_visualizations:
+        save_confusion_matrix(accumulator.confusion_matrix(), cfg, "../visualizations_bev", epoch="test")
+
+    print("\n" + "=" * 52)
+    print("RISULTATI SUL TEST SPLIT (dati mai visti)")
+    print("=" * 52)
+    for k, v in metrics.items():
+        print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+    print("=" * 52)
+
+    #salva su json accanto ai checkpoint, cosi' resta anche chiudendo il terminale
+    with open(Path(cfg.output_dir) / "test_metrics.json", "w") as f:
+        json.dump({k: (float(v) if isinstance(v, (int, float)) else v)
+                   for k, v in metrics.items()}, f, indent=2)
+
+    return metrics
+
 
 
 #CHECKPOINT----------------------------------------------------------------------
@@ -476,7 +533,7 @@ def main():
     set_seed(cfg.seed)
     torch.backends.cudnn.benchmark = True
  
-    train_loader, val_loader = build_dataloaders(cfg)
+    train_loader, val_loader, test_loader = build_dataloaders(cfg)
  
     model = CameraBEVNet(cfg, pretrained=True, backbone_checkpoint_path=cfg.backbone_checkpoint).to("cuda")
     print(f"[Model] Totale parametri: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
@@ -536,6 +593,9 @@ def main():
  
     save_checkpoint(model, optimizer, scheduler, cfg.num_epochs - 1, cfg, "full_model_final.pth")
     save_camera_branch(model, cfg, "camera_branch_final.pth")
+
+    test_metrics = test(model, test_loader, loss_fn, cfg, checkpoint_path=Path(cfg.output_dir) / "best_model.pth")
+    logger.log_epoch(cfg.num_epochs, test_metrics)
  
     logger.close()
     print("\n[Done] Training BEV completato.")
