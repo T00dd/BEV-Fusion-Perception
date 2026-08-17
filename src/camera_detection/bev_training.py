@@ -168,7 +168,8 @@ def _draw_bev_panel(ax, cones, cfg, title, gt_cones=None, fov_params=None):
 
 def save_bev_visualizations(pred_heatmap_logits, pred_offset, sample_ids,
                             cfg, output_dir, epoch, max_to_save=8):
-    output_dir = Path(output_dir) / f"epoch_{epoch:03d}"
+    subdir = f"epoch_{epoch:03d}" if isinstance(epoch, int) else str(epoch)
+    output_dir = Path(output_dir) / subdir
     output_dir.mkdir(parents=True, exist_ok=True)
     probs = torch.sigmoid(pred_heatmap_logits)
 
@@ -406,7 +407,7 @@ def validate(model, loader, loss_fn, val_accumulator, cfg, epoch):
 
 
 @torch.no_grad()
-def test(model, loader, loss_fn, cfg, checkpoint_path=None):
+def test(model, loader, loss_fn, cfg, checkpoint_path=None, max_visualizations = 500):
     
     #valutazione finale sul test split
 
@@ -425,6 +426,8 @@ def test(model, loader, loss_fn, cfg, checkpoint_path=None):
     sum_losses = {"loss_total": 0.0, "loss_focal": 0.0, "loss_offset": 0.0}
     num_batches = 0
 
+    num_visualized = 0
+
     for batch in loader:
         inputs, targets = to_device(batch, "cuda")
 
@@ -437,6 +440,17 @@ def test(model, loader, loss_fn, cfg, checkpoint_path=None):
         num_batches += 1
 
         accumulator.update(predictions["heatmap_logits"].float(), predictions["offset_pred"].float(), batch["sample_id"])
+
+        if cfg.save_visualizations and num_visualized < max_visualizations:
+            batch_size = predictions["heatmap_logits"].shape[0]
+            to_save = min(batch_size, max_visualizations - num_visualized)
+            save_bev_visualizations(
+                predictions["heatmap_logits"].float(), predictions["offset_pred"].float(),
+                list(batch["sample_id"]), cfg, "../visualizations_bev", epoch="test",
+                max_to_save=to_save,
+            )
+            num_visualized += to_save
+
 
     for k in sum_losses:
         sum_losses[k] /= max(num_batches, 1)
