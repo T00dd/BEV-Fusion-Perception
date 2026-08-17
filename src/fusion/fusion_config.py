@@ -34,7 +34,7 @@ class FusionTrainConfig:
 
 
     #training
-    num_epochs: int = 25
+    num_epochs: int = 15
     batch_size: int = 8
     num_workers: int = 12
     weight_decay: float = 1e-4
@@ -46,7 +46,7 @@ class FusionTrainConfig:
     image_size: tuple = (640, 640)   #(H, W)
 
     #target: sigma in celle. 2.0 a 0.25 m diventa 2.5 a 0.2 m
-    gaussian_sigma: float = 2.5
+    gaussian_sigma: float = 0.85   # = (2*MIN_RADIUS+1)/6 come il baseline lidar
 
     #loss
     focal_weight: float = 1.0
