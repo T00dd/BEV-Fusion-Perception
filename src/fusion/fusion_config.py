@@ -5,6 +5,12 @@ from typing import Optional
 __all__ = ["FusionTrainConfig"]
 
 
+#il training parte da qualunque directory invece che solo da src
+SRC = Path(__file__).resolve().parents[1]
+REPO = SRC.parent
+
+
+
 @dataclass
 class FusionTrainConfig:
 
@@ -16,15 +22,16 @@ class FusionTrainConfig:
     allow_encoder_finetune: bool = False
 
     #paths
-    dataset_root: Path = Path("../../dataset")
-    output_dir: Path = Path("./checkpoints/fusion")
-    lidar_cfg_file: Path = Path("../lidar_detection/cfgs/cone_centerpoint.yaml")
-    camera_cfg: Optional[object] = None   #BEVConfig; default costruito in main()
-    lidar_checkpoint: Path = Path("../models/lidar_encoder.pth")
-    camera_checkpoint: Path = Path("../models/camera_bev.pth")
+    dataset_root: Path = REPO / "carla_dataset_three_classses"
+    output_dir: Path = SRC / "checkpoints/fusion"
+    lidar_cfg_file: Path = SRC / "lidar_detection/configs/noise/second_centerpoint_agnostic_noise.yaml"
+    lidar_checkpoint: Path = REPO / "lib/OpenPCDet/output/lidar_detection/configs/noise/second_centerpoint_agnostic_noise/default/ckpt/checkpoint_epoch_80.pth"
+    camera_checkpoint: Path = SRC / "camera_detection/runs/run_4_carla_depth/models_(very_low_f1)/best_model.pth"
+    camera_cfg: Optional[object] = None
     train_split_file: str = "splits/train.txt"
     val_split_file: str = "splits/val.txt"
     test_split_file: str = "splits/test.txt"
+
 
     #training
     num_epochs: int = 25
