@@ -40,6 +40,11 @@ class FusionTrainConfig:
     weight_decay: float = 1e-4
     grad_clip: float = 10.0
 
+    #camera: servono a CameraPriorConfig e a FusionDatasetConfig
+    fx: float = 381.36
+    baseline: float = 1.0
+    image_size: tuple = (640, 640)   #(H, W)
+
     #target: sigma in celle. 2.0 a 0.25 m diventa 2.5 a 0.2 m
     gaussian_sigma: float = 2.5
 

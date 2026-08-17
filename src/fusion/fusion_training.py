@@ -231,8 +231,8 @@ def main(cfg: FusionTrainConfig):
 
 
     common = dict(batch_size=cfg.batch_size, num_workers=cfg.num_workers, collate_fn=collate_fusion, pin_memory=True)
-    train_loader = DataLoader(FusionDataset(cfg.dataset_root, cfg.train_split_file, training=True), shuffle=True, drop_last=True, **common)
-    val_loader = DataLoader(FusionDataset(cfg.dataset_root, cfg.val_split_file, training=False), shuffle=False, **common)
+    train_loader = DataLoader(make_dataset(cfg, cfg.train_split_file, lidar_processor), shuffle=True, drop_last=True, **common)
+    val_loader = DataLoader(make_dataset(cfg, cfg.val_split_file, lidar_processor), shuffle=False, **common)
 
 
     accumulator = BEVValidationAccumulator(
