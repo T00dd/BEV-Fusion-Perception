@@ -16,6 +16,7 @@ class TargetConfig:
     #2.0 cells at 0.25m becomes 2.5 cells at 0.2 m for the same physical extent
     sigma: float = 2.5
     num_colors: int = 3
+    min_points: int = 0
 
 
 @torch.no_grad()
@@ -48,6 +49,8 @@ def build_targets(
     row_i, col_i = row_f.floor().long(), col_f.floor().long()
 
     keep = (row_i >= 0) & (row_i < H) & (col_i >= 0) & (col_i < W)
+    if cfg.min_points > 0 and cones.shape[1] >= 6:
+        keep = keep & (cones[:, 5] >= cfg.min_points)
     b, row_f, col_f = b[keep], row_f[keep], col_f[keep]
     row_i, col_i = row_i[keep], col_i[keep]
     cls = cones[keep, 4].long()

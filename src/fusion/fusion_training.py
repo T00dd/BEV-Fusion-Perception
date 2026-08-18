@@ -247,7 +247,8 @@ def main(cfg: FusionTrainConfig):
         focal_alpha=cfg.focal_alpha, focal_beta=cfg.focal_beta,
     ))
     optimizer = torch.optim.AdamW(phase["groups"], weight_decay=cfg.weight_decay)
-    tcfg = TargetConfig(sigma=cfg.gaussian_sigma)
+    min_pts_target = 1 if cfg.phase == "phase0" else 0
+    tcfg = TargetConfig(sigma=cfg.gaussian_sigma, min_points=min_pts_target)
 
 
     common = dict(batch_size=cfg.batch_size, num_workers=cfg.num_workers, collate_fn=collate_fusion, pin_memory=True)

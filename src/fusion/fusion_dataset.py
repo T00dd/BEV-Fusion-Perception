@@ -175,8 +175,8 @@ class FusionDataset(Dataset):
         sx, sy = self.cfg.image_size[1] / cw, self.cfg.image_size[0] / ch
         return torch.tensor([fx * sx, fy * sy, cx * sx, cy * sy], dtype=torch.float32)
 
-    def _load_cones(self, scene_dir: Path, stem: str) -> torch.Tensor:
-        """(M, 4) as [x, y, z, class]. No FOV filter: see the module docstring."""
+    def _load_cones(self, scene_dir: Path, stem: str, points: Optional[torch.Tensor] = None) -> torch.Tensor:
+
         cones = load_cones_3d(scene_dir / "labels" / f"{stem}.json")
         x0, y0, _, x1, y1, _ = self.cfg.point_cloud_range
 
@@ -187,10 +187,21 @@ class FusionDataset(Dataset):
                 continue
             if not (x0 <= c["x"] < x1 and y0 <= c["y"] < y1):
                 continue
-            rows.append([c["x"], c["y"], c["z"], float(k)])
+
+            # Conta quanti punti LiDAR cadono attorno al cono
+            n_pts = 0
+            if points is not None and len(points) > 0:
+                dx = points[:, 0] - c["x"]
+                dy = points[:, 1] - c["y"]
+                dist_2d = torch.hypot(dx, dy)
+                dz = points[:, 2] - c["z"]
+                mask = (dist_2d <= 0.35) & (dz >= -0.5) & (dz <= 0.6)
+                n_pts = int(mask.sum().item())
+
+            rows.append([c["x"], c["y"], c["z"], float(k), float(n_pts)])
 
         return (torch.tensor(rows, dtype=torch.float32) if rows
-                else torch.zeros(0, 4, dtype=torch.float32))
+                else torch.zeros(0, 5, dtype=torch.float32))
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         scene, stem = self.samples[idx]
@@ -205,7 +216,7 @@ class FusionDataset(Dataset):
             "depth": self._load_depth(scene_dir, stem),
             "K": self._scaled_K(calib),
             "T": torch.from_numpy(calib["T"]),
-            "cones": self._load_cones(scene_dir, stem),
+            "cones": self._load_cones(scene_dir, stem, points=points),
         }
 
         if self.lidar_processor is not None:

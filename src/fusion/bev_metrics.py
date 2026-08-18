@@ -81,6 +81,69 @@ class BEVValidationAccumulator:
             for j in range(len(gt)):
                 self.instance_hit[f"{frame}|{j}"] = int(taken[j])
 
+    @torch.no_grad()
+    def update_from_raw(
+        self,
+        pred_xy: np.ndarray,
+        pred_scores: np.ndarray,
+        gt_xy: np.ndarray,
+        gt_classes: Optional[np.ndarray] = None,
+        gt_npts: Optional[np.ndarray] = None,
+        min_pts: int = 0,
+        max_pts: int = 999999,
+        frame_id: Optional[str] = None,
+    ):
+        frame = frame_id if frame_id is not None else str(self.n_frames)
+        self.n_frames += 1
+
+        in_range = (gt_xy[:, 0] >= 0.0) & (gt_xy[:, 0] <= 50.0) & (gt_xy[:, 1] >= -25.0) & (gt_xy[:, 1] <= 25.0)
+        if gt_npts is not None:
+            valid_gt_mask = in_range & (gt_npts >= min_pts) & (gt_npts <= max_pts)
+        else:
+            valid_gt_mask = in_range
+
+        gt_valid_indices = np.where(valid_gt_mask)[0]
+        gt = gt_xy[gt_valid_indices]
+        classes = gt_classes[gt_valid_indices] if gt_classes is not None else np.zeros(len(gt), dtype=int)
+        taken = np.zeros(len(gt), dtype=bool)
+
+        keep_preds = pred_scores >= self.threshold
+        p_xy = pred_xy[keep_preds]
+        p_sc = pred_scores[keep_preds]
+        order = np.argsort(-p_sc)
+
+        for pi in order:
+            best, best_dist = -1, self.radius
+            for j in range(len(gt)):
+                if taken[j]:
+                    continue
+                dist = float(np.hypot(p_xy[pi, 0] - gt[j, 0], p_xy[pi, 1] - gt[j, 1]))
+                if dist < best_dist:
+                    best, best_dist = j, dist
+
+            if best < 0:
+                self.fp.append({"range": float(np.hypot(p_xy[pi, 0], p_xy[pi, 1])), "score": float(p_sc[pi])})
+                continue
+
+            taken[best] = True
+            self.tp.append({
+                "dist": best_dist,
+                "range": float(np.hypot(gt[best, 0], gt[best, 1])),
+                "gt_class": int(classes[best]),
+                "pred_class": 0,
+            })
+
+        for j in range(len(gt)):
+            if not taken[j]:
+                self.fn.append({"range": float(np.hypot(gt[j, 0], gt[j, 1])), "gt_class": int(classes[j])})
+
+        for j_orig in range(len(gt_xy)):
+            if valid_gt_mask[j_orig]:
+                loc_idx = np.where(gt_valid_indices == j_orig)[0][0]
+                self.instance_hit[f"{frame}|{j_orig}"] = int(taken[loc_idx])
+            else:
+                self.instance_hit[f"{frame}|{j_orig}"] = 0
+
     def confusion_matrix(self) -> np.ndarray:
         cm = np.zeros((3, 3), dtype=int)
         for t in self.tp:
