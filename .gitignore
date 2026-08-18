@@ -40,3 +40,11 @@ DS_Store
 .DS_Store
 
 tests/
+
+src/lidar_detection/tools/bump.py
+src/lidar_detection/tools/gradient_retriever.py
+src/lidar_detection/tools/intensity.py
+src/lidar_detection/tools/intensity2.py
+src/lidar_detection/tools/plots.py
+src/lidar_detection/tools/plots2.py
+src/lidar_detection/tools/plots3.py
