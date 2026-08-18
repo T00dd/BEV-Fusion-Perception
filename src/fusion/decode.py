@@ -40,10 +40,16 @@ def decode_detections(
         )
 
         dets = []
+        offset = offset.clamp(0.0, 0.999)
+        H, W = presence.shape[-2:]
         for p in peaks:
             row_f, col_f = p["y"], p["x"]  # extractor returns (col, row) as (x, y)
             x, y = grid.grid_to_world(row_f, col_f)
-            probs = color_prob[i, :, int(row_f), int(col_f)]
+            # il ramo offset non e' vincolato a [0, 1): su un picco al bordo
+            # puo' sforare e portare l'indice fuori dalla griglia
+            r = min(max(int(row_f), 0), H - 1)
+            c = min(max(int(col_f), 0), W - 1)
+            probs = color_prob[i, :, r, c]
             dets.append({
                 "x": float(x),
                 "y": float(y),
