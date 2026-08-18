@@ -5,12 +5,14 @@ __pycache__/
 *.pyc
 .vscode/
 
-src/camera-pipeline/__pycache__
+src/camera_detection/__pycache__
 src/visualizations
 src/models
-src/camera-pipeline/checkpoints
-src/camera-pipeline/plotting/plots
-src/camera-pipeline/depth_sgbm
+src/camera_detection/checkpoints
+src/camera_detection/plotting/plots
+src/camera_detection/depth_sgbm
+src/camera_detection/runs
+src/checkpoints
 
 __pycache__/
 .vscode/
