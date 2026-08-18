@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Dict, List
 import wandb
 import json
-import csv
  
 import numpy as np
 import torch
@@ -414,9 +413,8 @@ def test(model, loader, loss_fn, cfg, checkpoint_path=None, max_visualizations =
 
     if checkpoint_path is not None and Path(checkpoint_path).is_file():
         print(f"[Test] Carico il best checkpoint: {checkpoint_path}")
-        state = torch.load(checkpoint_path, map_location="cuda", weights_only=False)
+        state = torch.load(checkpoint_path, map_location="cuda")
         model.load_state_dict(state["model_state_dict"])
-        loaded_epoch = state["epoch"]
         print(f"[Test] Checkpoint dell'epoca {state['epoch']}")
     else:
         print("[Test] Nessun checkpoint trovato, uso i pesi finali")
@@ -463,35 +461,17 @@ def test(model, loader, loss_fn, cfg, checkpoint_path=None, max_visualizations =
     if cfg.save_visualizations:
         save_confusion_matrix(accumulator.confusion_matrix(), cfg, "../visualizations_bev", epoch="test")
 
-        print("\n" + "=" * 52)
+    print("\n" + "=" * 52)
     print("RISULTATI SUL TEST SPLIT (dati mai visti)")
     print("=" * 52)
     for k, v in metrics.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
     print("=" * 52)
 
-    #salvataggio su file dedicati
-    out_dir = Path(cfg.output_dir)
-
-    serializable = {k: (float(v) if isinstance(v, (int, float, np.floating, np.integer)) else v) for k, v in metrics.items()}
-    serializable["checkpoint"] = str(checkpoint_path)
-    serializable["checkpoint_epoch"] = loaded_epoch
-    serializable["depth_source"] = cfg.depth_source
-    serializable["resolution"] = cfg.resolution
-    serializable["lift_subsamples"] = cfg.lift_subsamples
-    serializable["detection_threshold_val"] = cfg.detection_threshold_val
-    serializable["num_test_frames"] = len(loader.dataset)
-
-    with open(out_dir / "test_metrics.json", "w") as f:
-        json.dump(serializable, f, indent=2)
-
-    with open(out_dir / "test_metrics.csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["metric", "value"])
-        for k, v in serializable.items():
-            writer.writerow([k, v])
-
-    print(f"[Test] Metriche salvate in {out_dir}/test_metrics.json e .csv")
+    #salva su json accanto ai checkpoint, cosi' resta anche chiudendo il terminale
+    with open(Path(cfg.output_dir) / "test_metrics.json", "w") as f:
+        json.dump({k: (float(v) if isinstance(v, (int, float)) else v)
+                   for k, v in metrics.items()}, f, indent=2)
 
     return metrics
 
@@ -533,7 +513,6 @@ def main():
                         help="'none' per partire da ImageNet (ablation sul warmup)")
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--overfit_test", action="store_true")
-    parser.add_argument("--test", action="store_true", help="Salta il training: carica best_model.pth e valuta sul test split")
     args = parser.parse_args()
  
     cfg = BEVConfig()
@@ -579,15 +558,6 @@ def main():
         focal_alpha=cfg.focal_alpha,
         focal_beta=cfg.focal_beta,
     ).to("cuda")
-
-    if args.test:
-        ckpt_path = Path(cfg.output_dir) / "best_model.pth"
-        if not ckpt_path.is_file():
-            raise FileNotFoundError(f"Checkpoint non trovato: {ckpt_path}")
-        test(model, test_loader, loss_fn, cfg, checkpoint_path=ckpt_path)
-        if cfg.use_wandb:
-            wandb.finish()
-        return
  
     optimizer = torch.optim.AdamW(model.get_param(cfg.backbone_lr, cfg.head_lr, cfg.weight_decay))
     scheduler = build_scheduler(optimizer, cfg, len(train_loader))
@@ -597,7 +567,7 @@ def main():
  
     start_epoch, global_step = 0, 0
     if args.resume:
-        ckpt = torch.load(args.resume, map_location="cuda", weights_only=False)
+        ckpt = torch.load(args.resume, map_location="cuda")
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])

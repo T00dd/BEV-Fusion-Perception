@@ -323,9 +323,12 @@ if __name__ == "__main__":
     p.add_argument("--resume-from", type=Path, default=None)
     p.add_argument("--allow-encoder-finetune", action="store_true")
     p.add_argument("--epochs", type=int, default=None)
+    p.add_argument("--test", action="store_true", help="salta il training: solo inferenza del best model sul test split")
+    p.add_argument("--no-visualizations", action="store_true")
     a = p.parse_args()
 
     cfg = FusionTrainConfig(phase=a.phase, resume_from=a.resume_from, allow_encoder_finetune=a.allow_encoder_finetune)
-    if a.epochs is not None:
-        cfg.num_epochs = a.epochs
+    cfg.test_only = a.test
+    if a.no_visualizations:
+        cfg.save_visualizations = False
     main(cfg)

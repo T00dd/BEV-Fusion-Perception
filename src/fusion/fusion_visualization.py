@@ -89,7 +89,9 @@ def save_bev_visualizations(
         fov = None
         if K is not None and T is not None:
             k, t = K[i].detach().cpu().numpy(), T[i].detach().cpu().numpy()
-            fov = {"cam_x": float(t[0, 3]), "cam_y": float(t[1, 3]),"slope": float(k[0, 2] / k[0, 0])}
+            # K e' [fx, fy, cx, cy], non una 3x3: la pendenza del FOV e' cx/fx
+            fov = {"cam_x": float(t[0, 3]), "cam_y": float(t[1, 3]),
+                   "slope": float(k[2] / k[0])}
 
         fig, axs = plt.subplots(1, 2, figsize=(11, 6.5))
         _draw_bev_panel(axs[0], gt_cones, grid, "BEV GT (tutti i coni)",fov_params=fov)

@@ -5,7 +5,7 @@ import timm
 import torch
 import torch.nn as nn
  
-from model import DetectionHead2d 
+from .model import DetectionHead2d 
 
 
 class CameraBEVNet(nn.Module):

@@ -47,11 +47,11 @@ class BEVConfig:
     x_max: float = 50.0
     y_min: float = -25.0
     y_max: float = 25.0
-    resolution: float = 0.25   #griglia 200x200
+    resolution: float = 0.20 
 
     #sigma FISSO in celle: la griglia BEV e' metrica, non prospettica,
     #quindi l'adattivita' che serviva nel warmup 2D qui non ha motivo
-    gaussian_sigma: float = 2.0
+    gaussian_sigma: float = 2.5
 
     #modello (si prende che il backbone sia stato allenato nel warmup)
     backbone_name: str = "hrnet_w32.ms_in1k"
@@ -76,7 +76,7 @@ class BEVConfig:
     weight_decay: float = 1e-4
     warmup_epochs: int = 2
 
-    lift_subsamples: int = 2
+    lift_subsamples: int = 3
 
     #augmentation: (non geometrica in quanto romperebbe la corrispondenza pixel <-> depth <-> calibrazione)
     color_jitter_brightness: float = 0.3
