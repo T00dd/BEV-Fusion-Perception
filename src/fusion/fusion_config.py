@@ -1,11 +1,12 @@
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-__all__ = ["FusionTrainConfig"]
+__all__ = ["FusionTrainConfig", "check_paths", "repo_cwd"]
+ 
 
-
-#il training parte da qualunque directory invece che solo da src
 SRC = Path(__file__).resolve().parents[1]
 REPO = SRC.parent
 
@@ -20,6 +21,7 @@ class FusionTrainConfig:
     phase: str = "phase0"
     resume_from: Optional[Path] = None
     allow_encoder_finetune: bool = False
+    test_only: bool = False
 
     #paths
     dataset_root: Path = REPO / "carla_dataset_three_classses"
@@ -53,7 +55,16 @@ class FusionTrainConfig:
     offset_weight: float = 0.1
     focal_alpha: float = 2.0
     focal_beta: float = 4.0
-
+ 
+    #visualization: NB la cartella e' src/fusion/visualization/, per questo il
+    #modulo si chiama bev_visualization.py e non visualization.py (altrimenti
+    #Python troverebbe la cartella al posto del modulo)
+    save_visualizations: bool = True
+    visualization_dir: Path = SRC / "fusion/visualization"
+    num_visualizations_per_val: int = 8
+    num_visualizations_test: int = 500
+    color_conf_threshold: float = 0.45
+ 
     #validation
     detection_threshold: float = 0.3
     match_radius_m: float = 0.5

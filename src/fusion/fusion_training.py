@@ -16,6 +16,7 @@ from .fusion_dataset import FusionDataset, collate_fusion
 from .head import FusionHead, FusionHeadConfig
 from .head_loss import FusionLoss, FusionLossConfig
 from .targets import TargetConfig, build_targets
+from .fusion_visualization import save_bev_visualizations, save_confusion_matrix
 
 
 def setup_phase(backbone, head, phase: str) -> Dict:
@@ -99,12 +100,12 @@ def train_one_epoch(backbone, head, loader, loss_fn, optimizer, cfg, device, tcf
 
 
 @torch.no_grad()
-def validate(backbone, head, loader, accumulator, device, n_gate_bins=10):
+def validate(backbone, head, loader, accumulator, device, n_gate_bins=10, cfg=None, viz_dir=None, tag="", max_viz=0):
     head.eval()
     backbone.eval()
     accumulator.reset()
 
-    gate_curves, diag_sums, n = [], {}, 0
+    gate_curves, diag_sums, n, saved = [], {}, 0, 0
     for batch in loader:
         batch = to_device(batch, device)
         with autocast(device_type=device.type, dtype=torch.bfloat16):
@@ -112,6 +113,15 @@ def validate(backbone, head, loader, accumulator, device, n_gate_bins=10):
             preds = head(features)
 
         accumulator.update(preds, batch["gt"]["cones"])
+
+        if viz_dir is not None and saved < max_viz:
+            saved += save_bev_visualizations(
+                preds, batch["gt"]["cones"], batch["sample_id"], viz_dir,
+                grid=backbone.grid,
+                K=batch["camera"]["K"], T=batch["camera"]["T"],
+                threshold=cfg.detection_threshold,
+                color_conf_threshold=cfg.color_conf_threshold,
+                max_to_save=max_viz - saved, tag=tag)
         for k, v in gate_diagnostics(backbone, aux).items():
             diag_sums[k] = diag_sums.get(k, 0.0) + v
         gate_curves.append(backbone.gate_by_range(aux, n_bins=n_gate_bins))
@@ -121,12 +131,16 @@ def validate(backbone, head, loader, accumulator, device, n_gate_bins=10):
     out = accumulator.compute()
     out.update({f"val_{k}": v / max(n, 1) for k, v in diag_sums.items()})
 
-    #curva del gate contro la distanza: è la lettura diretta di dove il sistema si fida della camera invece che del lidar 
-    # va nel csv come colonne separate così si plotta 
+    #curva del gate contro la distanza: e' la lettura diretta di dove il sistema
+    #si fida della camera invece che del LiDAR. Va nel csv come colonne separate
+    #cosi' si plotta dopo senza rilanciare nulla
     curves = torch.stack([torch.as_tensor(c[1]) for c in gate_curves]).mean(0)
     centers = torch.as_tensor(gate_curves[0][0])
     for c, g in zip(centers.tolist(), curves.tolist()):
         out[f"gate_r{c:.0f}m"] = float(g)
+
+    if viz_dir is not None and saved:
+        save_confusion_matrix(accumulator.confusion_matrix(), viz_dir, tag)
 
     return out
 
@@ -140,16 +154,16 @@ def make_dataset(cfg, split_file: str, lidar_processor):
     )
 
 
-def run_test_split(backbone, head, cfg, device, out_dir, val_metrics, lidar_processor):
+def run_test_split(backbone, head, cfg, device, out_dir, val_metrics, lidar_processor, checkpoint=None):
     #il test si fa sul checkpoint MIGLIORE, non sui pesi dell'ultima epoca
-    best = out_dir / f"{cfg.phase}_best.pth"
+    best = Path(checkpoint) if checkpoint else out_dir / f"{cfg.phase}_best.pth"
     if not best.exists():
-        print("nessun checkpoint migliore, test saltato")
-        return
+        print(f"{best} non trovato, test saltato")
+        return None
     split = Path(cfg.dataset_root) / cfg.test_split_file
     if not split.exists():
         print(f"{split} non trovato, test saltato")
-        return
+        return None
 
     ckpt = torch.load(best, map_location=device, weights_only=False)
     backbone.load_state_dict(ckpt["backbone"])
@@ -161,23 +175,29 @@ def run_test_split(backbone, head, cfg, device, out_dir, val_metrics, lidar_proc
         collate_fn=collate_fusion, shuffle=False, pin_memory=True)
     acc = BEVValidationAccumulator(backbone.grid, cfg.detection_threshold,
                                    cfg.match_radius_m)
-    m = validate(backbone, head, loader, acc, device)
-    m["from_epoch"] = ckpt["epoch"]
 
+    viz_dir = Path(cfg.visualization_dir) / "test" if cfg.save_visualizations else None
+    m = validate(backbone, head, loader, acc, device, cfg=cfg, viz_dir=viz_dir, tag="test", max_viz=cfg.num_visualizations_test)
+    m["from_epoch"] = ckpt.get("epoch", -1)
 
     #una riga per split così il confronto val/test si legge da un solo file
     path = out_dir / "test_metrics.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
     keys = ["split"] + list(m.keys())
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
-        w.writerow({"split": "val", **val_metrics})
+        if val_metrics:
+            w.writerow({"split": "val", **val_metrics})
         w.writerow({"split": "test", **m})
 
-    print(f"\n==== TEST (checkpoint epoca {ckpt['epoch']}) ====")
+    print(f"\n==== TEST (checkpoint epoca {m['from_epoch']}) ====")
     for k in ("precision", "recall", "f1", "loc_p50_cm", "loc_p90_cm","loc_over_20cm", "color_acc"):
-        print(f"  {k:<16} val {val_metrics.get(k, float('nan')):.4f}   " f"test {m.get(k, float('nan')):.4f}")
-    print(f"  metriche complete in {path}\n")
+        v = val_metrics.get(k, float("nan")) if val_metrics else float("nan")
+        print(f"  {k:<16} val {v:.4f}   test {m.get(k, float('nan')):.4f}")
+    print(f"  metriche complete in {path}")
+    if viz_dir is not None:
+        print(f"  visualizzazioni in {viz_dir}\n")
     return m
 
 
@@ -197,7 +217,7 @@ def main(cfg: FusionTrainConfig):
             "phase2 sblocca gli encoder: F_L diventa mobile e la garanzia "
             "F_out = F_L + delta non vale piu'. Serve --allow-encoder-finetune."
         )
-    if cfg.phase != "phase0" and cfg.resume_from is None:
+    if cfg.phase != "phase0" and cfg.resume_from is None and not cfg.test_only:
         raise RuntimeError(f"{cfg.phase} deve partire da un checkpoint (--resume-from)")
 
     #LidarPointProcessor espone class_names, grid_size, voxel_size,
@@ -238,6 +258,14 @@ def main(cfg: FusionTrainConfig):
     accumulator = BEVValidationAccumulator(
         backbone.grid, cfg.detection_threshold, cfg.match_radius_m)
     out_dir = Path(cfg.output_dir) / cfg.phase
+
+
+    #--test: solo inferenza del best model sull'intero test split
+    if cfg.test_only:
+        run_test_split(backbone, head, cfg, device, out_dir, {}, lidar_processor, checkpoint=cfg.resume_from)
+        return
+    
+
     logger = TrainingLogger(out_dir, log_every_n_steps=cfg.log_every_n_steps)
     print(f"phase {cfg.phase}: color_weight {phase['color_weight']}, "
           f"log in {out_dir}")
@@ -252,7 +280,10 @@ def main(cfg: FusionTrainConfig):
     for epoch in range(cfg.num_epochs):
         t0 = time.time()
         step = train_one_epoch(backbone, head, train_loader, loss_fn, optimizer, cfg, device, tcfg, logger, phase, epoch, step)
-        m = validate(backbone, head, val_loader, accumulator, device)
+        viz_dir = None
+        if cfg.save_visualizations:
+            viz_dir = Path(cfg.visualization_dir) / "validation" / f"epoch_{epoch:03d}"
+        m = validate(backbone, head, val_loader, accumulator, device, cfg=cfg, viz_dir=viz_dir, tag=f"epoch {epoch:03d}", max_viz=cfg.num_visualizations_per_val)
         m["epoch_time_s"] = time.time() - t0
 
         #differenze contro la baseline B (checkpoint di fase 0): una regressione si vede subito invece che a fine training

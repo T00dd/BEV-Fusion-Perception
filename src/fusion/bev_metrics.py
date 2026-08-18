@@ -8,8 +8,7 @@ import torch
 from .decode import decode_detections
 from .grid_alignment import FUSION_GRID
 
-__all__ = ["BEVValidationAccumulator", "RANGE_BANDS", "CLASS_NAMES",
-           "compare_to_baseline"]
+__all__ = ["BEVValidationAccumulator", "RANGE_BANDS", "CLASS_NAMES", "compare_to_baseline"]
 
 RANGE_BANDS = ((0, 5), (5, 10), (10, 15), (15, 20), (20, 30), (30, 50))
 CLASS_NAMES = ("blue", "yellow", "orange")
@@ -18,12 +17,14 @@ LOC_THRESHOLDS_CM = (5, 10, 20)   #20 cm = una cella della griglia
 
 
 class BEVValidationAccumulator:
-    #accumula TP/FP/FN in metri e restituisce un dict piatto per il logger
-    def __init__(self, grid=FUSION_GRID, threshold: float = 0.3,
-                 match_radius_m: float = 0.5):
+    #accumula TP/FP/FN in metri e restituisce un dict piatto
+
+    def __init__(self, grid=FUSION_GRID, threshold: float = 0.3, match_radius_m: float = 0.5, min_lidar_points: int = 0):
         self.grid = grid
         self.threshold = threshold
         self.radius = match_radius_m
+        #min_lidar_points > 0 replica il filtro gt del ramo lidar: i coni con meno ritorni sono invisibili al sensore e il baseline li esclude dal denominatore
+        self.min_lidar_points = min_lidar_points
         self.reset()
 
     def reset(self):
@@ -43,6 +44,8 @@ class BEVValidationAccumulator:
 
         for i, dets in enumerate(batch):
             gt = cones[cones[:, 0] == i]
+            if self.min_lidar_points > 0 and gt.shape[1] > 5:
+                gt = gt[gt[:, 5] >= self.min_lidar_points]
             taken = np.zeros(len(gt), dtype=bool)
             frame = self.n_frames
             self.n_frames += 1
@@ -78,6 +81,12 @@ class BEVValidationAccumulator:
             for j in range(len(gt)):
                 self.instance_hit[f"{frame}|{j}"] = int(taken[j])
 
+    def confusion_matrix(self) -> np.ndarray:
+        cm = np.zeros((3, 3), dtype=int)
+        for t in self.tp:
+            cm[t["gt_class"], t["pred_class"]] += 1
+        return cm
+
     def compute(self) -> Dict[str, float]:
         out = {"frames": self.n_frames}
         out.update(self._block(self.tp, self.fp, self.fn, ""))
@@ -86,10 +95,9 @@ class BEVValidationAccumulator:
             sel = lambda xs: [x for x in xs if lo <= x["range"] < hi]
             out.update(self._block(sel(self.tp), sel(self.fp), sel(self.fn), f"_{lo}-{hi}m"))
 
-        #matrice di confusione 3x3 sui soli TP quindi separa i coni che non ha visto da quelli che ha visto ma con colore sbagliato
-        cm = np.zeros((3, 3), dtype=int)
-        for t in self.tp:
-            cm[t["gt_class"], t["pred_class"]] += 1
+        #matrice di confusione 3x3 sui soli TP: separa "non l'ho visto"
+        #da "l'ho visto ma sbaglio colore"
+        cm = self.confusion_matrix()
         for a, gt_name in enumerate(CLASS_NAMES):
             for b, pred_name in enumerate(CLASS_NAMES):
                 out[f"cm_{gt_name}_as_{pred_name}"] = int(cm[a, b])
