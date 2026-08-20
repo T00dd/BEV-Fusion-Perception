@@ -6,20 +6,22 @@ from typing import Tuple
 @dataclass
 class BEVConfig:
 
+    _REPO_ROOT = Path(__file__).resolve().parents[2]
+
     #paths
-    dataset_root: Path = Path("../../carla_dataset_three_classses")
-    output_dir: Path = Path("./checkpoints/bev")
-    models_dir: Path = Path("../models")
-    depth_dir: Path = Path("../../data/depth_sgbm")
+    dataset_root: Path = _REPO_ROOT / "carla_dataset_three_classses"
+    output_dir: Path = _REPO_ROOT / "checkpoints" / "bev"
+    models_dir: Path = _REPO_ROOT / "models_bev"
+    depth_dir: Path = _REPO_ROOT / "data" / "depth_sgbm"
     
     #backbone allenato nel warmup
-    backbone_checkpoint: Path = Path("../models/backbone.pth")
+    backbone_checkpoint: Path = _REPO_ROOT / "src" / "models" / "backbone.pth"
 
     #depth
     #"precomputed": legge depth_sgbm/*.npy generati offline 
     #"online": calcola SGBM dentro __getitem__ (comodo per debug)
     #"carla_gt": usa la depth GT di CARLA 
-    depth_source: str = "carla_gt"  # "precomputed", "online", "carla_gt"
+    depth_source: str = "carla_gt"     # "precomputed", "online", "carla_gt"
     depth_dir: str = "depth_sgbm"      # sottocartella scena per "precomputed"
     depth_gt_dir: str = "depth"        # depth CARLA, riferimento
     min_depth_m: float = 0.3

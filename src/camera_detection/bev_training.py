@@ -15,13 +15,13 @@ from torch.utils.data import DataLoader
 #training del ramo camera in bev
 #carica il backbone allenato nel warmup e allena backbone (lr basso) + head BEV (lr alto). Lifting e pooling sono fissi ma differenziabili.
  
-from bev_config import BEVConfig
-from bev_dataset import BEVDataset, cone_visible, load_calib, load_cones_3d, world_to_grid, COLOR_TO_CLASS
-from bev_model import CameraBEVNet
-from losses import WarmupLoss                                    #riciclato da  warmup
-from logger import TrainingLogger                                #riciclato da  warmup
-from metrics import extract_peaks_from_heatmap, match_detections_to_gt, compute_metrics, compute_color_metrics, compute_ap, confusion_matrix_from_tp, DISTANCE_BINS_BEV  #riciclato da  warmup
-from visualization import denormalize_image, color_heatmap       #riciclato da  warmup
+from .bev_config import BEVConfig
+from .bev_dataset import BEVDataset, cone_visible, load_calib, load_cones_3d, world_to_grid, COLOR_TO_CLASS
+from .bev_model import CameraBEVNet
+from .losses import WarmupLoss                                    #riciclato da  warmup
+from .logger import TrainingLogger                                #riciclato da  warmup
+from .metrics import extract_peaks_from_heatmap, match_detections_to_gt, compute_metrics, compute_color_metrics, compute_ap, confusion_matrix_from_tp, DISTANCE_BINS_BEV  #riciclato da  warmup
+from .visualization import denormalize_image, color_heatmap       #riciclato da  warmup
 
 
 
@@ -122,8 +122,8 @@ matplotlib.use("Agg")   # backend senza display, per server headless
 import matplotlib.pyplot as plt
 import torch
 
-from bev_dataset import COLOR_TO_CLASS, load_cones_3d, world_to_grid, grid_to_world
-from metrics import extract_peaks_from_heatmap
+from .bev_dataset import COLOR_TO_CLASS, load_cones_3d, world_to_grid, grid_to_world
+from .metrics import extract_peaks_from_heatmap
 
 _CLASS_COLORS = {0: "#2b6cb0", 1: "#d4a017", 2: "#dd6b20"}
 
