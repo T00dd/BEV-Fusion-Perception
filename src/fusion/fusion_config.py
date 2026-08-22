@@ -37,7 +37,7 @@ class FusionTrainConfig:
 
     #training
     num_epochs: int = 15
-    batch_size: int = 4
+    batch_size: int = 8
     num_workers: int = 12
     weight_decay: float = 1e-4
     lr_min: float = 1e-5          # eta_min del cosine scheduler
