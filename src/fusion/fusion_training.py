@@ -247,7 +247,7 @@ def main(cfg: FusionTrainConfig):
         focal_alpha=cfg.focal_alpha, focal_beta=cfg.focal_beta,
     ))
     optimizer = torch.optim.AdamW(phase["groups"], weight_decay=cfg.weight_decay)
-    min_pts_target = 1 if cfg.phase == "phase0" else 0
+    min_pts_target = 2 if cfg.phase == "phase0" else 0
     tcfg = TargetConfig(sigma=cfg.gaussian_sigma, min_points=min_pts_target)
 
 
@@ -257,7 +257,7 @@ def main(cfg: FusionTrainConfig):
 
 
     accumulator = BEVValidationAccumulator(
-        backbone.grid, cfg.detection_threshold, cfg.match_radius_m)
+        backbone.grid, cfg.detection_threshold, cfg.match_radius_m, min_lidar_points=2 if cfg.phase == "phase0" else 0)
     out_dir = Path(cfg.output_dir) / cfg.phase
 
 
