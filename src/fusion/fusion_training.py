@@ -240,6 +240,7 @@ def main(cfg: FusionTrainConfig):
     head = FusionHead(FusionHeadConfig(in_channels=backbone.out_channels)).to(device)
 
 
+    ckpt = None
     if cfg.resume_from is not None:
         ckpt = torch.load(cfg.resume_from, map_location=device, weights_only=False)
         backbone.load_state_dict(ckpt["backbone"])
@@ -253,10 +254,18 @@ def main(cfg: FusionTrainConfig):
         focal_alpha=cfg.focal_alpha, focal_beta=cfg.focal_beta,
     ))
     optimizer = torch.optim.AdamW(phase["groups"], weight_decay=cfg.weight_decay)
-    #senza decay il LR costante fa rimbalzare precision e localizzazione attorno
-    #al minimo: le ultime epoche sono quelle in cui la mediana scende davvero
+
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=cfg.num_epochs, eta_min=cfg.lr_min)
+
+    start_epoch, resumed_best_f1 = 0, -1.0
+    if ckpt is not None and ckpt.get("phase") == cfg.phase and "optimizer" in ckpt:
+        optimizer.load_state_dict(ckpt["optimizer"])
+        scheduler.load_state_dict(ckpt["scheduler"])
+        start_epoch = ckpt["epoch"] + 1
+        resumed_best_f1 = ckpt.get("best_f1", -1.0)
+        print(f"ripresa dall'epoca {start_epoch} (best F1 finora {resumed_best_f1:.4f})")
+
     min_pts_target = 2 if cfg.phase == "phase0" else 0
     tcfg = TargetConfig(sigma=cfg.gaussian_sigma, min_points=min_pts_target)
 
@@ -289,8 +298,8 @@ def main(cfg: FusionTrainConfig):
 
     #best_val accompagna il best checkpoint: confrontare il test del best con la
     #validation dell'ultima epoca metterebbe a paragone due modelli diversi
-    best_f1, step, last_val, best_val = -1.0, 0, {}, {}
-    for epoch in range(cfg.num_epochs):
+    best_f1, step, last_val, best_val = resumed_best_f1, 0, {}, {}
+    for epoch in range(start_epoch, cfg.num_epochs):
         t0 = time.time()
         step = train_one_epoch(backbone, head, train_loader, loss_fn, optimizer, cfg, device, tcfg, logger, phase, epoch, step)
         viz_dir = None
@@ -311,7 +320,10 @@ def main(cfg: FusionTrainConfig):
             backbone.assert_zero_init()
 
         state = {"backbone": backbone.state_dict(), "head": head.state_dict(),
-                 "epoch": epoch, "phase": cfg.phase, "metrics": m}
+                 "optimizer": optimizer.state_dict(),
+                 "scheduler": scheduler.state_dict(),
+                 "epoch": epoch, "best_f1": max(best_f1, m["f1"]),
+                 "phase": cfg.phase, "metrics": m}
         torch.save(state, out_dir / f"{cfg.phase}_last.pth")
         if m["f1"] > best_f1:
             best_f1, best_val = m["f1"], m
