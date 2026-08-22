@@ -71,6 +71,10 @@ def to_device(batch, device):
 
 
 def train_one_epoch(backbone, head, loader, loss_fn, optimizer, cfg, device, tcfg, logger, phase, epoch, step):
+    #con lo scheduler i lr cambiano a ogni epoca: vanno letti dall'optimizer,
+    #non dai valori iniziali di setup_phase
+    lr_head = optimizer.param_groups[0]["lr"]
+    lr_fusion = optimizer.param_groups[1]["lr"] if len(optimizer.param_groups) > 1 else 0.0
     head.train()
     backbone.fusion.train()
 
@@ -93,7 +97,7 @@ def train_one_epoch(backbone, head, loader, loss_fn, optimizer, cfg, device, tcf
         optimizer.step()
 
         log["grad_norm"] = float(grad_norm)
-        logger.log_step(epoch, step, log,lr_backbone=phase["lr_fusion"], lr_head=phase["lr_head"])
+        logger.log_step(epoch, step, log, lr_backbone=lr_fusion, lr_head=lr_head)
         step += 1
 
     return step
@@ -149,7 +153,8 @@ def make_dataset(cfg, split_file: str, lidar_processor):
     from .fusion_dataset import FusionDatasetConfig
     return FusionDataset(
         FusionDatasetConfig(dataset_root=cfg.dataset_root, split_file=split_file,
-                            image_size=cfg.image_size),
+                            image_size=cfg.image_size,
+                            depth_source=cfg.depth_source),
         lidar_processor,
     )
 
@@ -174,7 +179,8 @@ def run_test_split(backbone, head, cfg, device, out_dir, val_metrics, lidar_proc
         batch_size=cfg.batch_size, num_workers=cfg.num_workers,
         collate_fn=collate_fusion, shuffle=False, pin_memory=True)
     acc = BEVValidationAccumulator(backbone.grid, cfg.detection_threshold,
-                                   cfg.match_radius_m)
+                                   cfg.match_radius_m,
+                                   min_lidar_points=2 if cfg.phase == "phase0" else 0)
 
     viz_dir = Path(cfg.visualization_dir) / "test" if cfg.save_visualizations else None
     m = validate(backbone, head, loader, acc, device, cfg=cfg, viz_dir=viz_dir, tag="test", max_viz=cfg.num_visualizations_test)
@@ -247,6 +253,10 @@ def main(cfg: FusionTrainConfig):
         focal_alpha=cfg.focal_alpha, focal_beta=cfg.focal_beta,
     ))
     optimizer = torch.optim.AdamW(phase["groups"], weight_decay=cfg.weight_decay)
+    #senza decay il LR costante fa rimbalzare precision e localizzazione attorno
+    #al minimo: le ultime epoche sono quelle in cui la mediana scende davvero
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cfg.num_epochs, eta_min=cfg.lr_min)
     min_pts_target = 2 if cfg.phase == "phase0" else 0
     tcfg = TargetConfig(sigma=cfg.gaussian_sigma, min_points=min_pts_target)
 
@@ -277,7 +287,9 @@ def main(cfg: FusionTrainConfig):
         print(f"ATTENZIONE: {baseline_path} assente, nessun confronto con B")
 
 
-    best_f1, step, last_val = -1.0, 0, {}
+    #best_val accompagna il best checkpoint: confrontare il test del best con la
+    #validation dell'ultima epoca metterebbe a paragone due modelli diversi
+    best_f1, step, last_val, best_val = -1.0, 0, {}, {}
     for epoch in range(cfg.num_epochs):
         t0 = time.time()
         step = train_one_epoch(backbone, head, train_loader, loss_fn, optimizer, cfg, device, tcfg, logger, phase, epoch, step)
@@ -291,6 +303,7 @@ def main(cfg: FusionTrainConfig):
         
         m.update(compare_to_baseline(m, accumulator.instance_hit, baseline_path))
         logger.log_epoch(epoch, m)
+        scheduler.step()
         last_val = m
 
         #in phase0 delta deve essere rimasto esattamente 0
@@ -301,7 +314,7 @@ def main(cfg: FusionTrainConfig):
                  "epoch": epoch, "phase": cfg.phase, "metrics": m}
         torch.save(state, out_dir / f"{cfg.phase}_last.pth")
         if m["f1"] > best_f1:
-            best_f1 = m["f1"]
+            best_f1, best_val = m["f1"], m
             torch.save(state, out_dir / f"{cfg.phase}_best.pth")
             print(f"  nuovo best F1 {best_f1:.4f}")
 
@@ -314,7 +327,7 @@ def main(cfg: FusionTrainConfig):
         save_baseline(last_val, accumulator.instance_hit, baseline_path)
         print(f"baseline B salvata in {baseline_path}")
     print(f"fine training. best F1 in validation {best_f1:.4f}")
-    run_test_split(backbone, head, cfg, device, out_dir, last_val, lidar_processor)
+    run_test_split(backbone, head, cfg, device, out_dir, best_val, lidar_processor)
 
 
 if __name__ == "__main__":

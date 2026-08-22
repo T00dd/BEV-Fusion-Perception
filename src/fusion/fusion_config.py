@@ -28,7 +28,7 @@ class FusionTrainConfig:
     output_dir: Path = SRC / "checkpoints/fusion"
     lidar_cfg_file: Path = SRC / "lidar_detection/configs/noise/second_centerpoint_agnostic_noise.yaml"
     lidar_checkpoint: Path = REPO / "lib/OpenPCDet/output/lidar_detection/configs/noise/second_centerpoint_agnostic_noise/default/ckpt/checkpoint_epoch_80.pth"
-    camera_checkpoint: Path = SRC / "camera_detection/runs/run_4_carla_depth/models_(very_low_f1)/best_model.pth"
+    camera_checkpoint: Path = REPO / "models_bev/camera_branch.pth"
     camera_cfg: Optional[object] = None
     train_split_file: str = "splits/train.txt"
     val_split_file: str = "splits/val.txt"
@@ -40,9 +40,12 @@ class FusionTrainConfig:
     batch_size: int = 4
     num_workers: int = 12
     weight_decay: float = 1e-4
+    lr_min: float = 1e-5          # eta_min del cosine scheduler
     grad_clip: float = 10.0
 
     #camera: servono a CameraPriorConfig e a FusionDatasetConfig
+    #"carla_gt" legge da depth/, qualsiasi altro valore da depth_sgbm/
+    depth_source: str = "sgbm"
     fx: float = 381.36
     baseline: float = 1.0
     image_size: tuple = (640, 640)   #(H, W)

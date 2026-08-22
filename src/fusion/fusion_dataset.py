@@ -110,11 +110,15 @@ class FusionDataset(Dataset):
             d = self.root / "scenes" / scene
             if not d.is_dir():
                 continue
+
+            sub = (self.cfg.depth_gt_dir if self.cfg.depth_source == "carla_gt"
+                   else self.cfg.depth_dir)
             stems = (
                 {p.stem for p in (d / "lidar").glob("frame_*.bin")}
                 & {p.name.replace("_cam_left.png", "")
                    for p in (d / "images").glob("frame_*_cam_left.png")}
                 & {p.stem for p in (d / "labels").glob("frame_*.json")}
+                & {p.stem for p in (d / sub).glob("frame_*.npy")}
             )
             out.extend((scene, s) for s in sorted(stems))
         return out
