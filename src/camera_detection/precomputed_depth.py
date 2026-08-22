@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
  
-from bev_config import BEVConfig
-from bev_dataset import load_calib
-from stereo_depth import compare_depth, compute_depth_from_stereo
+from .bev_config import BEVConfig
+from .bev_dataset import load_calib
+from .stereo_depth import compare_depth, compute_depth_from_stereo
 
 
 def aggregate(stats_list):

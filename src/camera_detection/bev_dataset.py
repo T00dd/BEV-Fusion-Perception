@@ -195,7 +195,7 @@ class BEVDataset(Dataset):
 
         if cfg.depth_source == "precomputed":
             #depth pregenerate e salvate in file .npy
-            path = scene_dir / cfg.depth_dir / f"{frame_stem}.npy"
+            path = Path(cfg.depth_dir) / scene_dir.name / f"{frame_stem}.npy"
             if not path.is_file():
                 raise FileNotFoundError(
                     f"Depth SGBM non trovata: {path}. "

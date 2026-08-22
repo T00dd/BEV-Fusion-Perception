@@ -10,9 +10,9 @@ class BEVConfig:
 
     #paths
     dataset_root: Path = _REPO_ROOT / "carla_dataset_three_classses"
-    output_dir: Path = _REPO_ROOT / "checkpoints" / "bev"
+    output_dir: Path = _REPO_ROOT / "src" / "camera_detection" / "checkpoints" / "bev"
     models_dir: Path = _REPO_ROOT / "models_bev"
-    depth_dir: Path = _REPO_ROOT / "data" / "depth_sgbm"
+    depth_dir: Path = _REPO_ROOT / "depth_sgbm"
     
     #backbone allenato nel warmup
     backbone_checkpoint: Path = _REPO_ROOT / "src" / "models" / "backbone.pth"
@@ -21,8 +21,7 @@ class BEVConfig:
     #"precomputed": legge depth_sgbm/*.npy generati offline 
     #"online": calcola SGBM dentro __getitem__ (comodo per debug)
     #"carla_gt": usa la depth GT di CARLA 
-    depth_source: str = "carla_gt"     # "precomputed", "online", "carla_gt"
-    depth_dir: str = "depth_sgbm"      # sottocartella scena per "precomputed"
+    depth_source: str = "precomputed"     # "precomputed", "online", "carla_gt"
     depth_gt_dir: str = "depth"        # depth CARLA, riferimento
     min_depth_m: float = 0.3
     max_depth_m: float = 60.0
@@ -32,11 +31,11 @@ class BEVConfig:
     sgbm_num_disp: int = 192           #deve coprire la disparità a distanza minima
     sgbm_block_size: int = 5
     sgbm_uniqueness_ratio: int = 10
-    sgbm_speckle_window_size: int = 100
+    sgbm_speckle_window_size: int = 0
     sgbm_speckle_range: int = 2
     sgbm_disp12_max_diff: int = 1
     sgbm_lr_consistency: bool = True   #left-right consistency check
-    sgbm_lr_max_diff: float = 1.0      #px di tolleranza tra le due disparità
+    sgbm_lr_max_diff: float = 2.0      #px di tolleranza tra le due disparità
 
     #dataset
     image_size: Tuple[int, int] = (640, 640)
@@ -63,6 +62,8 @@ class BEVConfig:
     head_hidden_channels: int = 128
     head_num_layers: int = 5
 
+    nms_kernel_size: int = 3
+    
     #loss
     focal_loss_weight: float = 1.0
     offset_loss_weight: float = 0.1
@@ -74,9 +75,9 @@ class BEVConfig:
     batch_size: int = 16
     num_workers: int = 12
     backbone_lr: float = 2e-5
-    head_lr: float = 6e-4
+    head_lr: float = 1e-4
     weight_decay: float = 1e-4
-    warmup_epochs: int = 2
+    warmup_epochs: int = 3
 
     lift_subsamples: int = 3
 
@@ -92,9 +93,10 @@ class BEVConfig:
     log_every_n_steps: int = 50
     save_visualizations: bool = True
     num_visualizations_per_val: int = 8
-    detection_threshold: float = 0.2
-    detection_threshold_val: float = 0.05
+    detection_threshold: float = 0.3
+    detection_threshold_val: float = 0.1
     match_radius_m: float = 0.5
+    max_detection_val: int = 600
 
     grad_clip_norm: float = 1.0
     seed: int = 14

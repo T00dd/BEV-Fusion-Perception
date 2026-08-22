@@ -54,7 +54,7 @@ class BEVValidationAccumulator:
             detections = extract_peaks_from_heatmap(
                 probs[b].cpu(), offset_pred[b].cpu(),
                 stride=1, threshold=cfg.detection_threshold_val,
-                max_detections=300,
+                max_detections=cfg.max_detection_val,
             )
  
             scene_id, frame_stem = sample_ids[b].split("/")
@@ -216,7 +216,8 @@ def save_bev_visualizations(pred_heatmap_logits, pred_offset, sample_ids,
         _draw_bev_panel(axs[0], gt_cones, cfg, "BEV GT (Tutti i coni)", fov_params=fov_params)
         _draw_bev_panel(axs[1], pred_cones, cfg, "BEV pred (GT in trasparenza)", gt_cones=gt_cones, fov_params=fov_params)
         
-        fig.suptitle(f"{sample_ids[i]}  -  epoch {epoch:03d}", fontsize=11)
+        epoch_label = f"epoch {epoch:03d}" if isinstance(epoch, int) else str(epoch)
+        fig.suptitle(f"{sample_ids[i]}  -  {epoch_label}", fontsize=11)
         fig.tight_layout()
         fig.savefig(output_dir / f"{sample_ids[i].replace('/', '_')}.png",
                     dpi=110, bbox_inches="tight")
@@ -230,7 +231,8 @@ def save_confusion_matrix(matrix, cfg, output_dir, epoch):
     #matrice di confusione dei colori, righe = GT, colonne = predetto
     
 
-    output_dir = Path(output_dir) / f"epoch_{epoch:03d}"
+    epoch_label = f"epoch_{epoch:03d}" if isinstance(epoch, int) else str(epoch)
+    output_dir = Path(output_dir) / epoch_label
     output_dir.mkdir(parents=True, exist_ok=True)
 
     n = cfg.num_classes
@@ -254,7 +256,7 @@ def save_confusion_matrix(matrix, cfg, output_dir, epoch):
                     ha="center", va="center", fontsize=9, color=color)
 
     accuracy = np.trace(matrix) / max(matrix.sum(), 1)
-    ax.set_title(f"Confusione colore - epoch {epoch:03d}\n"
+    ax.set_title(f"Confusione colore - epoch {epoch_label}\n"
                  f"accuracy {accuracy:.4f} su {matrix.sum()} coni localizzati",
                  fontsize=10)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -413,7 +415,7 @@ def test(model, loader, loss_fn, cfg, checkpoint_path=None, max_visualizations =
 
     if checkpoint_path is not None and Path(checkpoint_path).is_file():
         print(f"[Test] Carico il best checkpoint: {checkpoint_path}")
-        state = torch.load(checkpoint_path, map_location="cuda")
+        state = torch.load(checkpoint_path, map_location="cuda", weights_only=False)
         model.load_state_dict(state["model_state_dict"])
         print(f"[Test] Checkpoint dell'epoca {state['epoch']}")
     else:
@@ -469,9 +471,23 @@ def test(model, loader, loss_fn, cfg, checkpoint_path=None, max_visualizations =
     print("=" * 52)
 
     #salva su json accanto ai checkpoint, cosi' resta anche chiudendo il terminale
+    def _plain(v):
+        if isinstance(v, (np.integer, np.floating)):
+            return v.item()
+        return v
+
+    serializable = {k: _plain(v) for k, v in metrics.items()}
+    serializable["checkpoint"] = str(checkpoint_path)
+    serializable["depth_source"] = cfg.depth_source
+    serializable["resolution"] = cfg.resolution
+    serializable["lift_subsamples"] = cfg.lift_subsamples
+    serializable["num_test_frames"] = len(loader.dataset)
+
     with open(Path(cfg.output_dir) / "test_metrics.json", "w") as f:
-        json.dump({k: (float(v) if isinstance(v, (int, float)) else v)
-                   for k, v in metrics.items()}, f, indent=2)
+        json.dump(serializable, f, indent=2)
+
+    print(f"[Test] Metriche salvate in {cfg.output_dir}/test_metrics.json")
+
 
     return metrics
 
@@ -513,6 +529,7 @@ def main():
                         help="'none' per partire da ImageNet (ablation sul warmup)")
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--overfit_test", action="store_true")
+    parser.add_argument("--test", action="store_true", help="Salta il training: carica best_model.pth e valuta sul test split")
     args = parser.parse_args()
  
     cfg = BEVConfig()
@@ -558,6 +575,15 @@ def main():
         focal_alpha=cfg.focal_alpha,
         focal_beta=cfg.focal_beta,
     ).to("cuda")
+
+    if args.test:
+        ckpt_path = Path(cfg.output_dir) / "best_model.pth"
+        if not ckpt_path.is_file():
+            raise FileNotFoundError(f"Checkpoint non trovato: {ckpt_path}")
+        test(model, test_loader, loss_fn, cfg, checkpoint_path=ckpt_path)
+        if cfg.use_wandb:
+            wandb.finish()
+        return
  
     optimizer = torch.optim.AdamW(model.get_param(cfg.backbone_lr, cfg.head_lr, cfg.weight_decay))
     scheduler = build_scheduler(optimizer, cfg, len(train_loader))

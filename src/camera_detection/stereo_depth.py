@@ -61,9 +61,20 @@ def compute_depth_from_stereo(
         u_right = np.round(u - disp).astype(np.int32)
         in_range = (u_right >= 0) & (u_right < W)
         rows = np.arange(H)[:, None].repeat(W, 1)
-        disp_r_at = np.full_like(disp, np.nan)
+
+        #SGBM marca i pixel senza match con -1, non con NaN: senza questa maschera
+        #il confronto |disp - (-1)| supera sempre la tolleranza e scarta tutto
+        disp_r_known = disp_r > (p["min_disp"] - 0.5)
+
+        right_known = np.zeros_like(in_range)
+        right_known[in_range] = disp_r_known[rows[in_range], u_right[in_range]]
+
+        disp_r_at = np.zeros_like(disp)
         disp_r_at[in_range] = disp_r[rows[in_range], u_right[in_range]]
-        valid &= in_range & np.isfinite(disp_r_at) & (np.abs(disp - disp_r_at) <= p["lr_max_diff"])
+
+        #incoerente solo dove la destra ha davvero un'informazione da contraddire
+        inconsistent = right_known & (np.abs(disp - disp_r_at) > p["lr_max_diff"])
+        valid &= in_range & ~inconsistent
  
 
     depth = np.zeros_like(disp)

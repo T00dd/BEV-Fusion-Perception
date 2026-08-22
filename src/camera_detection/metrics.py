@@ -30,8 +30,9 @@ def extract_peaks_from_heatmap(
 
     #nms via max pooling
     padding = nms_kernel_size // 2
-    pooling = F.max_pool2d(heatmap.unsqueeze(0), kernel_size=nms_kernel_size, stride=1, padding=padding).squeeze(0)
-    keep_mask = (heatmap == pooling).float() * heatmap #0 dove non è un picco locale
+    reference = heatmap.max(dim=0, keepdim=True).values          #(1, H, W)
+    pooled = F.max_pool2d(reference.unsqueeze(0), kernel_size=nms_kernel_size, stride=1, padding=padding).squeeze(0)  #(1, H, W)
+    keep_mask = (heatmap >= pooled).float() * heatmap #0 dove non è un picco locale
 
 
     #estrazione di tutti i pixel sopra la soglia 

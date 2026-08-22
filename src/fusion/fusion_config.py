@@ -37,7 +37,7 @@ class FusionTrainConfig:
 
     #training
     num_epochs: int = 15
-    batch_size: int = 8
+    batch_size: int = 4
     num_workers: int = 12
     weight_decay: float = 1e-4
     grad_clip: float = 10.0
