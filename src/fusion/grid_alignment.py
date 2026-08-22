@@ -78,7 +78,7 @@ class GridSpec:
         return x.view(-1, 1).expand(self.n_x, self.n_y), y.view(1, -1).expand(self.n_x, self.n_y)
 
 LIDAR_GRID = GridSpec(resolution=0.2)
-CAMERA_GRID = GridSpec(resolution=0.25)
+CAMERA_GRID = GridSpec(resolution=0.2)
 FUSION_GRID = LIDAR_GRID
 
 # index permutation
